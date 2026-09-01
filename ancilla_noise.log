@@ -1,0 +1,16 @@
+(base) skoranne@spark-bc08:~/PROGRAMS/QUANTUM$ python3 ancilla_noise.py                                                       
+Formulating Noisy 97-Qubit IBM Circuit Mesh (70 Data + 27 Ancilla)...                                                         
+
+============================================================
+   REPLICATED RE-SUBMISSION HARDWARE METRICS
+============================================================
+1. Total Checked Elements: 97 qubits mapped linearly.
+2. Post-Selection Acceptance Rate: 71.200%
+   - Clean Accepted Runs: 712 shots
+   - Discarded (Ancilla Caught Error): 288 shots
+
+3. Post-Selected Data Output Distribution Top Peaks:
+   |111101011000110...00010> -> Hits: 1 (Prob: 0.14%)
+   |101010110100011...11010> -> Hits: 1 (Prob: 0.14%)
+   |111011000111010...00101> -> Hits: 1 (Prob: 0.14%)
+============================================================
