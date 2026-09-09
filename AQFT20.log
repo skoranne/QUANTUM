@@ -1,0 +1,12 @@
+=== Performance & Amplitude Comparison (n = 64, t = 20 -> 1048576 terms) ===
+
+[Method 1: Classical Coppersmith Expansion]
+  - Computed Amplitude : -5248+5248*E(8)^2-7424*E(8)^3
+  - Execution Runtime  : 20.878 seconds
+
+[Method 2: MINSPM Galois Analytical Product]
+  - Computed Amplitude : -5248+5248*E(8)^2-7424*E(8)^3
+  - Execution Runtime  : 0. seconds
+
+Exact Algebraic Equivalence Match : true
+

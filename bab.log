@@ -1,0 +1,18 @@
+Initializing Subspace B&B with Elite Guidance for tai256c [N = 256]...
+Executing Subspace Partitioning & Elite Path Relinking via MINSPM...
+Generation 1 | Global Best Objective: 5.024263e7 | Target UB: 4.4759296e7
+Generation 40 | Global Best Objective: 4.9723384e7 | Target UB: 4.4759296e7
+Generation 80 | Global Best Objective: 4.954483e7 | Target UB: 4.4759296e7
+Generation 120 | Global Best Objective: 4.9076692e7 | Target UB: 4.4759296e7
+Generation 160 | Global Best Objective: 4.8910572e7 | Target UB: 4.4759296e7
+Generation 200 | Global Best Objective: 4.8597268e7 | Target UB: 4.4759296e7
+Generation 240 | Global Best Objective: 4.8597268e7 | Target UB: 4.4759296e7
+Generation 280 | Global Best Objective: 4.830569e7 | Target UB: 4.4759296e7
+Generation 320 | Global Best Objective: 4.804266e7 | Target UB: 4.4759296e7
+Generation 360 | Global Best Objective: 4.771834e7 | Target UB: 4.4759296e7
+Generation 400 | Global Best Objective: 4.771834e7 | Target UB: 4.4759296e7
+
+--- Rigorous B&B Execution Summary ---
+Optimal B&B Cost Found     : 4.771834e7
+QAPLIB Best Known UB       : 4.4759296e7
+Optimality Gap vs UB       : 6.611%

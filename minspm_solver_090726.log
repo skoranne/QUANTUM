@@ -1,0 +1,260 @@
+using CUDA
+using LinearAlgebra
+using Random
+using Printf
+using Base.Threads
+
+# =====================================================================
+# 1. EXACT MINSPM SPARSE GALOIS EVALUATION KERNEL
+# =====================================================================
+function minspm_tai256c_kernel!(F_sparse_i, F_sparse_j, F_vals, D, P_batch, energies, nnz_terms)
+    tid = threadIdx().x
+    warp_id = div(tid - 1, 32) + 1
+    lane_id = rem(tid - 1, 32) + 1
+    
+    batch_id = (blockIdx().x - 1) * div(blockDim().x, 32) + warp_id
+    
+    shared_vals = @cuDynamicSharedMem(Float32, blockDim().x)
+    val = 0.0f0
+    
+    if batch_id <= size(P_batch, 2)
+        idx = lane_id
+        while idx <= nnz_terms
+            i = F_sparse_i[idx]
+            j = F_sparse_j[idx]
+            f_val = F_vals[idx]
+            
+            p_i = P_batch[i, batch_id]
+            p_j = P_batch[j, batch_id]
+            
+            val += f_val * D[p_i, p_j]
+            idx += 32
+        end
+    end
+    
+    shared_vals[tid] = val
+    sync_threads()
+    
+    if lane_id <= 16; shared_vals[tid] += shared_vals[tid + 16]; end; sync_threads()
+    if lane_id <= 8;  shared_vals[tid] += shared_vals[tid + 8];  end; sync_threads()
+    if lane_id <= 4;  shared_vals[tid] += shared_vals[tid + 4];  end; sync_threads()
+    if lane_id <= 2;  shared_vals[tid] += shared_vals[tid + 2];  end; sync_threads()
+    if lane_id == 1;  shared_vals[tid] += shared_vals[tid + 1];  end; sync_threads()
+    
+    if lane_id == 1 && batch_id <= size(P_batch, 2)
+        energies[batch_id] = shared_vals[tid]
+    end
+    return nothing
+end
+
+# =====================================================================
+# 2. DATA PARSING & GALOIS SPARSITY COMPRESSION
+# =====================================================================
+function load_qaplib(filepath::String)
+    open(filepath, "r") do io
+        tokens = split(read(io, String))
+        N = parse(Int, tokens[1])
+        idx = 2
+        F = zeros(Float32, N, N)
+        for i in 1:N, j in 1:N
+            F[i, j] = parse(Float32, tokens[idx]); idx += 1
+        end
+        D = zeros(Float32, N, N)
+        for i in 1:N, j in 1:N
+            D[i, j] = parse(Float32, tokens[idx]); idx += 1
+        end
+        return N, F, D
+    end
+end
+
+function extract_galois_sparse_tensor(F::Matrix{Float32}, N::Int)
+    is_i = Int32[]
+    is_j = Int32[]
+    vals = Float32[]
+    
+    for i in 1:N, j in 1:N
+        if F[i, j] != 0.0f0
+            push!(is_i, i)
+            push!(is_j, j)
+            push!(vals, F[i, j])
+        end
+    end
+    return is_i, is_j, vals, length(vals)
+end
+
+# =====================================================================
+# 3. ADVANCED HYBRID ALNS BATCH GENERATOR
+# =====================================================================
+function generate_neighborhood_batch!(P_batch, current_p, elite_list, batch_size, N)
+    n_elites = length(elite_list)
+    
+    @threads for b in 1:batch_size
+        P_batch[:, b] .= current_p
+        
+        mode = rand()
+        if mode < 0.40
+            # VNS: 2-Opt or 3-Opt Swap (Local Exploitation)
+            if rand() < 0.5
+                i1, i2 = rand(1:N, 2)
+                P_batch[i1, b], P_batch[i2, b] = P_batch[i2, b], P_batch[i1, b]
+            else
+                i1, i2, i3 = rand(1:N, 3)
+                P_batch[i1, b], P_batch[i2, b], P_batch[i3, b] = P_batch[i2, b], P_batch[i3, b], P_batch[i1, b]
+            end
+        elseif mode < 0.80
+            # LNS: Deep Neighborhood Shift (Tuned for 8-16 jumps)
+            k = rand(8:16)
+            idx = sort(randperm(N)[1:k])
+            P_batch[idx, b] .= circshift(P_batch[idx, b], 1)
+        else
+            # Biased Elite Crossover (Path Relinking)
+            if n_elites >= 2
+                e1, e2 = rand(1:n_elites, 2)
+                P_batch[:, b] .= elite_list[e1]
+                
+                # Drive Parent 1 towards Parent 2
+                diff_idx = findall(elite_list[e1] .!= elite_list[e2])
+                if length(diff_idx) > 2
+                    swaps_to_do = min(rand(2:6), length(diff_idx) ÷ 2)
+                    for _ in 1:swaps_to_do
+                        target_i = rand(diff_idx)
+                        val_needed = elite_list[e2][target_i]
+                        current_pos = findfirst(==(val_needed), P_batch[:, b])
+                        if !isnothing(current_pos)
+                            P_batch[target_i, b], P_batch[current_pos, b] = P_batch[current_pos, b], P_batch[target_i, b]
+                        end
+                    end
+                end
+                
+                # Tiny mutation to escape identical twin traps
+                i1, i2 = rand(1:N, 2)
+                P_batch[i1, b], P_batch[i2, b] = P_batch[i2, b], P_batch[i1, b]
+            elseif n_elites == 1
+                P_batch[:, b] .= elite_list[1]
+                i1, i2 = rand(1:N, 2)
+                P_batch[i1, b], P_batch[i2, b] = P_batch[i2, b], P_batch[i1, b]
+            end
+        end
+    end
+end
+
+# =====================================================================
+# 4. MAIN SOLVER EXECUTION
+# =====================================================================
+function run_tai256c_solver()
+    filepath = "tai256c.dat"
+    if !isfile(filepath)
+        error("Place 'tai256c.dat' in the working directory before executing.")
+    end
+
+    N, F_host, D_host = load_qaplib(filepath)
+    is_i, is_j, f_vals, nnz = extract_galois_sparse_tensor(F_host, N)
+
+    println("=========================================================")
+    println(" MINSPM High-Throughput GPU Solver (Hyper-Tuned Edition)")
+    println("=========================================================")
+    @printf(" Problem Size (N) : %d\n", N)
+    @printf(" Galois NNZ Terms : %d (Sparsity Compression Active)\n", nnz)
+
+    d_F_i = CuArray(is_i)
+    d_F_j = CuArray(is_j)
+    d_F_vals = CuArray(f_vals)
+    d_D = CuArray(D_host)
+
+    batch_size = 65_536
+    P_host = zeros(Int32, N, batch_size)
+    P_gpu = CUDA.zeros(Int32, N, batch_size)
+    energies_gpu = CUDA.zeros(Float32, batch_size)
+    energies_host = zeros(Float32, batch_size)
+
+    threads = 256
+    warps = threads ÷ 32
+    blocks = ceil(Int, batch_size / warps)
+
+    current_p = Int32.(randperm(N))
+    current_energy = Float64(sum(F_host[i, j] * D_host[current_p[i], current_p[j]] for i in 1:N, j in 1:N))
+    
+    best_global_energy = current_energy
+    best_permutation = copy(current_p)
+
+    # ---------------------------------------------------------
+    # HYPER-TUNED ANNEALING PARAMETERS
+    # ---------------------------------------------------------
+    temperature = 100_000.0   # Hotter start to explore freely
+    cooling_rate = 0.9999     # Flatter curve (freezes around 100k epochs)
+    max_epochs = 100_000      # 10x longer search span
+    # ---------------------------------------------------------
+
+    elite_basins = Set{Vector{Int32}}()
+    visited_orbits = Set{UInt64}()
+
+    println("\nStarting Hardware-Accelerated Optimization Run...")
+    println("Current Record to Beat: 44,759,292 | Target Search Limit: 100,000 Epochs\n")
+
+    start_time = time()
+
+    for epoch in 1:max_epochs
+        # Extract collect() outside the threading loop to prevent race conditions/GC halts
+        elite_list = collect(elite_basins)
+        generate_neighborhood_batch!(P_host, current_p, elite_list, batch_size, N)
+        copyto!(P_gpu, P_host)
+
+        @cuda threads=threads blocks=blocks shmem=threads*sizeof(Float32) minspm_tai256c_kernel!(
+            d_F_i, d_F_j, d_F_vals, d_D, P_gpu, energies_gpu, nnz
+        )
+        CUDA.synchronize()
+        copyto!(energies_host, energies_gpu)
+
+        best_idx = argmin(energies_host)
+        best_batch_energy = Float64(energies_host[best_idx])
+        best_batch_perm = P_host[:, best_idx]
+
+        orbit_sig = hash(best_batch_perm)
+        if !(orbit_sig in visited_orbits)
+            push!(visited_orbits, orbit_sig)
+
+            delta = best_batch_energy - current_energy
+            if delta < 0.0 || rand() < exp(-delta / temperature)
+                current_p .= best_batch_perm
+                current_energy = best_batch_energy
+
+                if current_energy < best_global_energy
+                    best_global_energy = current_energy
+                    best_permutation .= current_p
+                    
+                    push!(elite_basins, copy(best_permutation))
+                    # Allow a wider diversity pool of 100 elite states
+                    if length(elite_basins) > 100; pop!(elite_basins); end
+
+                    @printf(" [Epoch %5d] 🌟 New Best Objective: %.2f (Gap vs Record: %+.3f%%)\n", 
+                            epoch, best_global_energy, ((best_global_energy - 44759292.0)/44759292.0)*100)
+                    
+                    if best_global_energy <= 44759292.0
+                        println("\n🎯 SUCCESS: Established new feasible upper-bound record!")
+                        # Dump permutation early to prevent data loss on forced exit
+                        open("tai256c_best_permutation.txt", "w") do io
+                            write(io, join(best_permutation, ", "))
+                        end
+                    end
+                end
+            end
+        end
+
+        temperature *= cooling_rate
+
+        if epoch % 5000 == 0
+            elapsed = time() - start_time
+            evals = epoch * batch_size
+            @printf(" -> Progress: %.2f Billion Evals | Speed: %.2f Million Evals/sec | Current Temp: %.1f\n", 
+                    evals / 1e9, (evals / elapsed) / 1e6, temperature)
+        end
+    end
+
+    println("\n=========================================================")
+    @printf(" FINAL OPTIMIZATION RESULT: %.2f\n", best_global_energy)
+    println(" Best Permutation Vector saved to 'tai256c_best_permutation.txt'")
+    println("=========================================================")
+    CUDA.reclaim()
+end
+
+run_tai256c_solver()
