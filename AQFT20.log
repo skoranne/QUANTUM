@@ -107,3 +107,16 @@ Parameters: n = 64, t = 20 (2^t = 1048576 terms), K = 6
 -----------------------------------------------------------------                                                     
  Exact Equivalence Match (A = B = C): true
 =================================================================        
+=================================================================                                                     
+ HIGH-DIVERSITY STRESS TEST RESULTS (n = 128, t = 64, K = 12)                                                         
+=================================================================                                                     
+  - Total Variables (t)           : 64
+  - Truncation Range (K)          : 12
+  - Unique Classes (u)            : 63
+  - Compression Ratio (t / u)     : 1.015873015873016
+  - Coefficient Generation Time   : 0.s
+  - Naive Factorized Product Time : 0.001s
+  - MINSPM Dictionary Time        : 0.001s
+  - Coppersmith Brute-Force       : Infeasible (> 10^19 ops)                                                          
+  - Algebraic Equivalence Match   : true
+=================================================================                                                     
