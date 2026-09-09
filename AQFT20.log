@@ -10,3 +10,100 @@
 
 Exact Algebraic Equivalence Match : true
 
+=== Performance & Amplitude Comparison (n = 64, t = 24 -> 16777216 terms) ===                                         
+
+[Method 1: Classical Coppersmith Expansion]
+  - Computed Amplitude : -35840*E(8)+50688*E(8)^2-35840*E(8)^3                                                        
+  - Execution Runtime  : 338.236 seconds
+
+[Method 2: MINSPM Galois Analytical Product]
+  - Computed Amplitude : -35840*E(8)+50688*E(8)^2-35840*E(8)^3                                                        
+  - Execution Runtime  : 0. seconds
+
+Exact Algebraic Equivalence Match : true
+
+=== Performance & Amplitude Comparison (n = 64, t = 26 -> 67108864 terms) ===                                         
+
+[Method 1: Classical Coppersmith Expansion]
+  - Computed Amplitude : 50688-122368*E(8)+122368*E(8)^2-50688*E(8)^3                                                 
+  - Execution Runtime  : 1380.123 seconds
+
+[Method 2: MINSPM Galois Analytical Product]
+  - Computed Amplitude : 50688-122368*E(8)+122368*E(8)^2-50688*E(8)^3                                                 
+  - Execution Runtime  : 0. seconds
+
+Exact Algebraic Equivalence Match : true
+=================================================================                                                     
+ MINSPM vs COPPERSMITH: HIGH-K TRUNCATION & PERFORMANCE BENCHMARK                                                     
+=================================================================                                                     
+
+--> TEST 1: Explicit Test Vector (n = 64, t = 20, K = 10, Ring Z_1024)                                                
+    Evaluating 2^20 (1,048,576) explicit superposition terms...                                                       
+    [PASS] Exact Algebraic Match Confirmed.
+    - Classical Coppersmith O(2^t) Runtime : 28.837 seconds                                                           
+    - MINSPM Algebraic O(t) Runtime        : 0. seconds
+
+--> TEST 2: Randomized Test Vector (n = 64, t = 20, K = 12, Ring Z_4096)                                              
+    Evaluating 2^20 (1,048,576) explicit superposition terms...                                                       
+    [PASS] Exact Algebraic Match Confirmed.
+    - Classical Coppersmith O(2^t) Runtime : 35.703 seconds                                                           
+    - MINSPM Algebraic O(t) Runtime        : 0. seconds
+
+=================================================================                                                     
+    n := 64;
+    t := 26; # Evaluates an implicit 67,108,864 superposition terms                                                   
+
+    # Structured 64-bit test vector output frequency pattern                                                          
+    y_vec := [
+      1,1,0,1,0,1,1,0,
+      1,0,1,1,1,0,0,1,
+      0,1,1,0,1,1,0,1,
+      1,1,0,0,1,0,1,1,
+      0,1,0,1,1,0,1,0,
+      1,0,1,0,0,1,1,0,
+      1,1,0,1,0,1,0,1,
+      0,1,1,0,1,0,1,1
+    ];
+
+
+=== MINSPM Performance Benchmark (n = 64, t = 26 -> 67108864 terms) ===                                               
+
+[Method 1: Classical Coppersmith Expansion]
+  - Computed Amplitude : -5120-7168*E(8)-5120*E(8)^2
+  - Execution Runtime  : 1375.53 seconds
+
+[MINSPM Finite-Ring Analytical Product]
+  - Computed Amplitude : -5120-7168*E(8)-5120*E(8)^2
+  - Execution Runtime  : 0. seconds
+
+=================================================================                                                     
+ METHOD COMPARISON: BRUTE-FORCE vs. NAIIVE vs. MINSPM DICTIONARY                                                      
+=================================================================                                                     
+Parameters: n = 64, t = 20 (2^t = 1048576 terms), K = 6
+
+[Method A: MINSPM Dictionary Factorization]
+  - Amplitude Result  : 36+103*E(64)+88*E(64)^2+93*E(64)^3+130*E(64)^4+83*E(64)^5+160*E(64)^6+115*E(64)^7+166*E(64)^8 
+ +167*E(64)^9+144*E(64)^10+181*E(64)^11+110*E(64)^12+181*E(64)^13+144*E(64)^14+167*E(64)^15+166*E(64)^16+115*E(64)^17 
+ +160*E(64)^18+83*E(64)^19+130*E(64)^20+93*E(64)^21+88*E(64)^22+103*E(64)^23+36*E(64)^24+79*E(64)^25-8*E(64)^26       
+ +19*E(64)^27-19*E(64)^29+8*E(64)^30-79*E(64)^31
+  - Unique Classes (u): 14 out of 20 variables
+  - Execution Runtime : 0. seconds
+
+[Method B: Naive Sequential Product]
+  - Amplitude Result  : 36+103*E(64)+88*E(64)^2+93*E(64)^3+130*E(64)^4+83*E(64)^5+160*E(64)^6+115*E(64)^7+166*E(64)^8 
+ +167*E(64)^9+144*E(64)^10+181*E(64)^11+110*E(64)^12+181*E(64)^13+144*E(64)^14+167*E(64)^15+166*E(64)^16+115*E(64)^17 
+ +160*E(64)^18+83*E(64)^19+130*E(64)^20+93*E(64)^21+88*E(64)^22+103*E(64)^23+36*E(64)^24+79*E(64)^25-8*E(64)^26       
+ +19*E(64)^27-19*E(64)^29+8*E(64)^30-79*E(64)^31
+  - Execution Runtime : 0. seconds
+
+[Method C: Brute-Force Coppersmith Expansion O(2^t)]
+  - Running 1,048,576 state evaluations...
+  - Amplitude Result  : 36+103*E(64)+88*E(64)^2+93*E(64)^3+130*E(64)^4+83*E(64)^5+160*E(64)^6+115*E(64)^7+166*E(64)^8 
+ +167*E(64)^9+144*E(64)^10+181*E(64)^11+110*E(64)^12+181*E(64)^13+144*E(64)^14+167*E(64)^15+166*E(64)^16+115*E(64)^17 
+ +160*E(64)^18+83*E(64)^19+130*E(64)^20+93*E(64)^21+88*E(64)^22+103*E(64)^23+36*E(64)^24+79*E(64)^25-8*E(64)^26       
+ +19*E(64)^27-19*E(64)^29+8*E(64)^30-79*E(64)^31
+  - Execution Runtime : 23.503 seconds
+
+-----------------------------------------------------------------                                                     
+ Exact Equivalence Match (A = B = C): true
+=================================================================        
