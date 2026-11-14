@@ -1,0 +1,72 @@
+# Plan: Complete and Test Exotic Asian Option Pricing (Classical MC + QPE/QAE)
+
+## Confirmed scope
+- **Instrument**: exotic arithmetic-average Asian option (path-dependent), priced on US underlyings/data is in scope (“USA ok”). European-style Asian baseline; if “USA” is meant to include American early-exercise, that’s a separate pricer (flagged below) — plan treats the Asian calculator as primary unless clarified.
+- **Quantum method (real circuits, not just spectral simulation)**: implement **QAE/QPE** for payoff-amplitude estimation with **cuQuantum preferred, Qiskit Aer fallback** (runtime detection). Replaces/augments the current simulated `evaluate_minspm_spectrum`/oracle-MC shortcuts with an actual circuit-based estimate.
+- **Backtest**: realized-payoff backtests from in-repo CSVs (`soxx_asset_prices.csv`, `soxx_correlation_matrix.csv`, `asset_prices.csv`, `GEN_CSV/*`).
+- **Canonical bases**: `multi_asset_gpu_CSV5.jl` (weighted SOXX basket, GPU MC, real CSV) and `path_dep_option5.jl` (corrected NIG/dt path logic, MC ground truth, explicit QAE vs refined spectrum reference).
+
+## Current state (from investigation)
+- **Asian basket, GPU + MINSPM-QAE spectral**: `multi_asset.jl` (CPU), `multi_asset_gpu.jl` (CUDA MC kernel + MINSPM spectrum), `multi_asset_gpu_CSV.jl` → `multi_asset_gpu_CSV5.jl` (latest: ingests SOXX CSVs, cap-weighted basket anchored to $530, CUDA MC kernel, MINSPM-QAE spectrum). `GEN_CSV/{asset_prices,correlation_matrix}.csv` also present.
+- **Path-dependent Asian spread**: `path_dep_option.jl` … `path_dep_option5.jl` (latest most rigorous: LUT NIG increments, 1M-path MC ground truth, explicit QAE vs refined MINSPM spectrum).
+- **Spread/other (not Asian)**: `option_pricing.jl`, `option_pricing_grid.jl`, `minspm_qae*.jl`, `hok_leitao.jl`, `qae*.jl` / `qae_explicit*.jl`.
+- **Data in-repo**: `asset_prices.csv`, `soxx_asset_prices.csv`, `soxx_correlation_matrix.csv`, `GEN_CSV/*` (historical price series for calibration/realized-payoff backtests; no traded Asian/US option quote time series found).
+- **What “QPE/QAE + GPU” is today**: `multi_asset_gpu_CSV5.jl` runs classical path simulation on GPU (CUDA kernel) — fast/GPU part. `evaluate_minspm_spectrum` is CPU analytical QFT-peak search given an `oracle_amplitude` (from MC), not a quantum circuit / true QPE and not GPU-accelerated. `path_dep_option5.jl` compares explicit vs refined MINSPM spectrum (simulated). Codebase implements simulated QAE/MINSPM amplitude extraction alongside (GPU) classical MC, not a realized QPE circuit.
+
+## Observed gaps / issues to address
+- **Fragmentation/duplication**: many versioned scripts with drifting logic; no single canonical exotic Asian option calculator.
+- **Correctness/consistency risks (CSV5/GPU path)**: `weights = rand(...)` not real cap weights; `bound_b`/normalization and discounting must be consistent between MC oracle, MC estimator, and QAE; kernel has commented-out terminal-payoff block (deliberate Asian-vs-European choice needed); `n_paths` used vs reported must match; NIG parameter/dt handling should use corrected per-step increment formulation (as in path_dep_option5).
+- **“USA option” ambiguity**: not present; American early exercise differs from European Asian (nontrivial). Confirm intent if needed.
+- **Backtesting gap**: no real option-quote series in-repo. Feasible: model-vs-realized (calibrate from rolling windows, price Asian, compare to realized average/terminal payoff). Real traded Asian quotes require external data.
+- **Untested**: no automated tests/CI; GPU paths require CUDA hardware; numerical stability (besselkx/LUT tails, correlation PSD fix) and convergence not systematically checked.
+
+## Implementation plan (ordered)
+
+### 1) Establish a canonical, correct classical baseline (ground truth)
+*Goal: a single, trusted pricer for validation and for the quantum-oracle/amplitude target.*
+
+1. **Consolidate core logic** from the two bases (flat style, new focused script(s), avoid editing many legacy variants):
+   - **`asian_option_mc.jl` (or similar)**: arithmetic-average Asian pricer, deterministic-seeded.
+     - Reuse `path_dep_option5.jl`’s corrected per-step NIG increment formulation (`risk_neutral_nig_params` per `dt`, direct `log_S += fast_quantile(lut, u)`; remove drift) and LUT/CDF construction; configurable `S0/strike/T/r/steps/n_paths`, single-asset and weighted multi-asset basket (Cholesky/copula).
+     - CPU path always; **GPU path** by adapting `multi_asset_gpu_CSV5.jl`’s `@cuda` kernel behind `if CUDA.functional()` with identical payoff/discount semantics.
+   - **Fix CSV5 issues while porting**: (a) replace random weights with explicit, reproducible weights (accept weight vector/column or documented fixed weights; keep normalization `sum=1`); (b) make normalization/discounting consistent: define `a = E[min(max(avg_basket-K,0), B)/B]` (or un-capped) and `price = a * B * exp(-rT)` identically in MC, oracle, and QAE; (c) resolve commented terminal-payoff block—keep arithmetic Asian (path average) default, optional terminal-European toggle clearly labeled; (d) verify `n_paths` used == reported; (e) keep PSD-repair of correlation but log/warn when applied.
+2. **Reference checks** in a `--validate`/self-test mode (no external test framework): MC SE ~1/√N convergence; GPU vs CPU agreement within SE; bounds (`0 ≤ price ≤ B*e^{-rT}` / underlying caps); deep ITM/OTM sanity; determinism on CPU. For lognormal-reducible cases compare against geometric-Asian/BS control where applicable.
+
+### 2) Real QAE/QPE pricing (cuQuantum preferred, Qiskit Aer fallback)
+*Goal: circuit-based amplitude estimation of the (discretized) Asian payoff expectation, with honest scaling.*
+
+1. **Python QAE module (e.g. `qae_asian.py`)** — quantum stack in Python (Qiskit used in repo; cuQuantum is NVIDIA/CUDA Python). Julia baseline remains reference; interface via CLI/JSON/files (inputs: distribution/payoff discretization or payoff table, `S0,K,r,T,steps`; output: estimated amplitude/price, SE/shots, backend used).
+2. **Backend selection (runtime)**:
+   - Try **cuQuantum**: `qiskit-aer-gpu` / AerSimulator with cuStateVec/cuTensorNet (`device='GPU'`, `method='statevector'` or tensor-network as appropriate) or relevant bindings; detect via import/capability probe and fall back on failure.
+   - Fallback **Qiskit Aer**: `AerSimulator(method='statevector')` (CPU) or available GPU method. Record/report chosen backend.
+3. **Circuit model (pragmatic, testable)** — exact multi-step, multi-asset Asian state-prep is qubit-expensive; plan a discretized, fidelity-controlled formulation:
+   - **Distribution/load**: encode discretized (log) price distribution over `n_q` register qubits (affine/lognormal or NIG-approximated bins); for path-dependent Asian, start with discretized arithmetic-average over a small `m` monitoring steps (or single-asset path register) sized to fit simulatable qubit counts, with documented approximation vs full 252-step MC.
+   - **Payoff oracle**: comparator/rotation to encode scaled payoff `f(x)=min(max(avg_basket-K,0),B)/B` into an ancilla amplitude so success probability = target amplitude `a`.
+   - **Amplitude estimation**: implement Iterative Amplitude Estimation (IAE/MLAE) or QPE-based canonical QAE (Grover operator `Q = A S0 A† Sf`) to estimate `a`; return `price = â * B * e^{-rT}`.
+   - Parameterize (qubits/steps/bins) to run on available memory (cuQuantum GPU vs Aer CPU) and clearly state discretization error vs classical MC ground truth.
+4. **Cross-validate**: on small/medium instances compare QAE-circuit price to Julia MC/analytic baseline (and to `path_dep_option5.jl` explicit-spectrum result as numerical reference) within combined discretization + sampling/phase error; ensure CSV-driven inputs can feed the same case.
+
+> Note: a full 128-asset×252-step exact quantum state-prep is infeasible on simulators; deliver a real, working QAE/QPE circuit pricer on a tractable discretization plus scaling notes, with high-fidelity classical (GPU) MC as production ground truth — both compared in one report.
+
+### 3) Real-data CSV backtest (realized payoff)
+1. **`backtest_asian.jl` (or `.py`)** using provided CSVs:
+   - Load `soxx_asset_prices.csv` (+ `soxx_correlation_matrix.csv`) and/or `GEN_CSV/asset_prices.csv`.
+   - **Rolling/expanding windows**: for each evaluation date, calibrate from lookback (returns → vols/corr; NIG params as in CSV5/path_dep5, risk-free `r` configurable) → price ATM (or specified `K`) arithmetic Asian over forward horizon `T` with `M` steps via canonical classical pricer (and optionally QAE estimate on a reduced case).
+   - **Realized benchmark**: compute realized arithmetic-average payoff over the forward window from actual CSV prices; compare model price (discounted) vs realized discounted payoff (and vs a simple reference, e.g. BS-MC) with error/bias/MAE over time.
+   - Output summary table/CSV of results; handle edge cases (insufficient forward data, missing values) explicitly.
+
+### 4) Integration, docs, and runbook
+1. **Single entry flow** (documented): e.g. `julia --project=. asian_option_mc.jl` (price/backtest/validate modes, CPU/GPU) and `python qae_asian.py ...` (auto-selects cuQuantum→Aer) so a trading-assistant run prices fast via (GPU) MC and, when requested, produces a QAE-circuit estimate for cross-check.
+2. **Docs** (short `OPTIONS_PRICING.md` or section): assumptions (arithmetic Asian, NIG-copula, discretization), run commands, data sources, backend selection, limitations (American exercise out-of-scope unless added; QAE discretization vs full-path MC; no traded-quote series).
+3. **Respect repo conventions** (`AGENTS.md`): run from root, no cleanup of artifacts, `julia --project=.`, keep flat script style, no invented CI/tests.
+
+## Risks / decisions to confirm during implementation
+- **“USA option”**: if this requires American early-exercise pricing/backtest, add an LSMC module and a listed-option data source (not in CSVs) — scoped follow-on; current plan treats US-underlying Asian as primary.
+- **QAE scale**: full-fidelity Asian state-prep is qubit-heavy; deliverable is a correct, real-circuit QAE on a tractable discretization cross-validated against MC, not a 32k-dim exact circuit. cuQuantum availability depends on local NVIDIA/CUDA+Python stack (detection+fallback handles this).
+- **GPU**: kernels need CUDA-capable environment (`using CUDA`, `CUDA.functional()`); CPU MC remains portable path.
+
+## Suggested implementation order
+1. Canonical classical MC (+GPU parity) & validation
+2. CSV realized-payoff backtest
+3. QAE/QPE circuit module with cuQuantum/Aer selection & cross-validation
+4. Integration/reporting

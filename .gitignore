@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Julia
+*.jl.cov
+*.jl.mem
+
+# Logs and generated outputs
+*.log
+log
+log2
+log3
+solution*.txt
+*_backtest_*_results.csv
+*_prices.csv
+
+# Build/vendor artifacts
+ddsim/
+build/
+
+# OS/editor
+.DS_Store
+*.swp
+*.tmp
+
+# Large/local data caches (uncomment if needed)
+# qaplib/
