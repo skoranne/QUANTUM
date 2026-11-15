@@ -87,6 +87,26 @@ python qae_asian.py --S0 100 --K 100 --r 0.03 --sigma 0.2 --T 1 --steps 1 --nq-p
 
 Outputs JSON: discretized reference, circuit-prepared **statevector** amplitude (exact for the circuit), **direct ancilla sampling** estimate (+SE), and canonical QPE-on-Grover estimate, plus backend/qubit info. Use statevector/sampling as the authoritative circuit results.
 
+## 5) MINSPM Options TUI (`options_tui.jl`) — ATM +2w/+4w, Greeks, convexity hedge & arbitrage signals
+
+Julia ANSI TUI that dynamically fetches live ATM spot/history (via `yfinance`), prices +2 week and +4 week **ATM arithmetic-average Asian calls** using the **self-sufficient coherent MINSPM moment oracle + MINSPM QCS QPE** (deterministic, no MC sampling), computes **Greeks (delta, gamma, vega)** by bump-and-reprice, and shows a **convexity/gamma hedge monitor** and **arbitrage/opportunity signals**.
+
+Focus tickers: `VZ, AMZN, NVDA, AMD, INTC, QCOM, AVGO, AAPL`.
+
+```bash
+# One-shot dashboard (fetch, price, render, exit)
+julia --project=. options_tui.jl --once
+
+# Interactive/refreshing dashboard (default refresh 30s; q to quit)
+julia --project=. options_tui.jl --refresh 30
+```
+
+Output includes per-ticker/tenor: spot/strike/vol, MINSPM Asian fair, delta/gamma/vega, Euro-BS reference, and signals (e.g. discount vs Euro, high-gamma WARN). Convexity monitor reports **Γ P&L per 1% move = 0.5·Γ·S²·0.0001** and suggested delta-neutral hedge shares; vega is per 1 vol point.
+
+Notes:
+- **Arbitrage/opportunity signals** are **model-vs-Euro-BS reference** flags (arithmetic Asian fair is typically below European). Verify against **executable market quotes** (e.g. listed/OTC option chain) before trading; refining to live market-quote comparison and brokerage execution is a planned next step (broker/API/credentials required).
+- Pricing uses the fast deterministic moment-matching MINSPM oracle (microsecond-scale, self-sufficient). It can differ from tight Monte Carlo goldens by ~O(0.006–0.01+) in tested cases (model/discretization approximation); treat as a fast fair-value/screening estimate and validate against MC/market as needed.
+
 ## Data files
 
 - `soxx_asset_prices.csv`, `soxx_correlation_matrix.csv`, `GEN_CSV/` — historical/calibration inputs for basket pricing and backtests.
