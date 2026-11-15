@@ -54,7 +54,19 @@ julia --project=. asian_option_mc.jl price-ticker amzn_prices.csv
 
 Example (1Y ATM arithmetic Asian call, GPU MC, calibrated from 1y history): VZ ~\$2.53 (BS ref ~\$5.84), AMZN ~\$16.67 (BS ref ~\$40.38) — Asian < European is expected due to averaging.
 
-## 2) MINSPM Julia QCS QPE/QAE (`minspm_qcs_qae.jl`)
+## 2) Coherent MINSPM oracle + QCS QPE/QAE (`coherent_oracle_minspm.jl`) — **self-sufficient, no MC sampling**
+
+Deterministic, bounded-codebook coherent oracle: propagates risk-neutral NIG-path moments algebraically (no random sampling) to obtain the arithmetic-average payoff amplitude, then applies **MINSPM QCS QPE/QAE** (bounded Galois ring `Z_{2^k}`, direct O(1) / refined O(u) phase recovery). Benchmarked against a continuous 252-step Monte Carlo golden (CSV-calibrated VZ/AMZN).
+
+```bash
+julia --project=. coherent_oracle_minspm.jl vz_prices.csv
+julia --project=. coherent_oracle_minspm.jl amzn_prices.csv
+julia --project=. coherent_oracle_minspm.jl --soxx
+```
+
+Reports: coherent price/amplitude, MINSPM QPE (direct/refined) recovery, MC golden price ±SE, |Δ| accuracy, and speedup. The oracle and QPE stages are fully deterministic/self-sufficient (no MC sampling).
+
+## 3) MINSPM Julia QCS QPE/QAE with sampled oracle (`minspm_qcs_qae.jl`)
 
 Bounded-entropy / bounded-codebook MINSPM QCS: 128-asset × 252-step (continuous path space) oracle via (GPU) MC sampling, **quantized amplitude codebook** (bounded H), and **QPE/QAE phase estimation** over a bounded Galois/cyclotomic phase register (`Z_{2^k}`, truncation `k`) with MINSPM direct (O(1)) and refined (u-class) algebraic recovery.
 
@@ -65,7 +77,7 @@ julia --project=. minspm_qcs_qae.jl --n-paths 20000 --k-trunc 8 --m-bits 28 --u-
 
 Reports: oracle/codebook amplitudes & prices, explicit bounded-register QAE, MINSPM refined and direct-Galois QPE/QAE prices, errors vs oracle, and the bounded entropy/codebook summary. Requires `soxx_asset_prices.csv` and `soxx_correlation_matrix.csv` in the repo root.
 
-## 3) Circuit-based QAE/QPE module (`qae_asian.py`)
+## 4) Circuit-based QAE/QPE module (`qae_asian.py`)
 
 Real circuit-based amplitude estimation on a **tractable discretized** Asian payoff (exact full 128×252 state-prep is infeasible on simulators). Prefers **GPU Aer (cuQuantum/cuStateVec-backed when available)**, falls back to CPU Qiskit Aer.
 
