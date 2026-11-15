@@ -361,7 +361,7 @@ if abspath(PROGRAM_FILE) == @__FILE__
     if arg == "--soxx"
         df = CoherentOracleMINSPM.CSV.read("soxx_asset_prices.csv", CoherentOracleMINSPM.DataFrame)
         mat = Matrix{Float64}(df[:, 2:end])
-        idx_series = vec(mean(mat, dims=2))
+        idx_series = vec(CoherentOracleMINSPM.mean(mat, dims=2))
         CoherentOracleMINSPM.run_case("SOXX equal-weight basket (CSV)", idx_series)
     elseif arg == "--demo"
         rng=MersenneTwister(1); S0=100.0; r=0.04; vol=0.25; dt=1/252
