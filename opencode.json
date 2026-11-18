@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai",
+  "model": "dgx-spark/gemma4:31b",
+  "provider": {
+    "dgx-spark": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "DGX Spark (spark-bc08)",
+      "options": {
+        "baseURL": "http://spark-bc08.local:11434/v1"
+      },
+      "models": {
+        "qwen3-coder-next:latest": {
+          "name": "qwen3-coder-next:latest (Spark)",
+          "limit": {
+            "context": 65536,
+            "output": 16384
+          }
+        }
+      }
+    }
+  }
+}
+

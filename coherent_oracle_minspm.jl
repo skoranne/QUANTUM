@@ -365,8 +365,11 @@ if abspath(PROGRAM_FILE) == @__FILE__
         CoherentOracleMINSPM.run_case("SOXX equal-weight basket (CSV)", idx_series)
     elseif arg == "--demo"
         rng=MersenneTwister(1); S0=100.0; r=0.04; vol=0.25; dt=1/252
-        prices=[S0]; logS=log(S0)
-        for _ in 1:300; logS += (r-0.5*vol^2)*dt + vol*sqrt(dt)*randn(rng); push!(prices,exp(logS)); end
+        prices=[S0]; logS_cur=log(S0)
+        for _ in 1:300
+            logS_cur += (r-0.5*vol^2)*dt + vol*sqrt(dt)*randn(rng)
+            push!(prices, exp(logS_cur))
+        end
         CoherentOracleMINSPM.run_case("Synthetic demo", prices)
     else
         prices = CoherentOracleMINSPM.load_single_csv(arg)
