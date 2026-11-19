@@ -7,96 +7,94 @@
 \usepackage{hyperref}
 \usepackage{xcolor}
 \usepackage{listings}
-\geometry{margin=1in}
+\geometry{margin=0.85in}
 
 \lstset{basicstyle=\ttfamily\footnotesize,breaklines=true,frame=single,language=Julia}
 
-\title{QAE, QPE, and MINSPM with Cyclotomic Dictionary Encoding\\for Arithmetic Asian Options on Brent (CB-BZ)}
-\author{Quantum Finance Notes (generated from repository analysis)}
+\title{QAE, QPE, and MINSPM with Cyclotomic Dictionary Encoding\\for Arithmetic Asian Options on Brent (CB-BZ):\\Accuracy-First Notes}
+\author{Quantum Finance Notes (repository analysis)}
 \date{\today}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-We describe how Quantum Phase Estimation (QPE), Quantum Amplitude Estimation (QAE), and Matrix-Induced Non-linear Spectral Product Mapping (MINSPM) are combined to price arithmetic Asian (AA) options. The key algebraic tool is \emph{cyclotomic dictionary encoding}: phases in $\mathbb{Z}_{2^K}$ with $\zeta_{2^K}=e^{2\pi i/2^K}$ yield separable factorization $\sum_x \zeta_{2^K}^{Q(x,y)}=\prod_j (1+\zeta_{2^K}^{c_j(y)})$, avoiding exponential enumeration. We present QPE/QAE (with $\mathcal{O}(1/\epsilon)$ amplitude estimation vs.\ Monte Carlo $\mathcal{O}(1/\epsilon^2)$), MINSPM low-rank compression, a motivating Julia snippet, revised paired timing/accuracy comparisons, a synthetic same-assumption match table, and Brent CB-BZ calibration results. We emphasize: algorithmic speedups do not help if prices are wrong—so numerical agreement under matched assumptions and careful model alignment (beyond raw estimator choice) are essential.
+QAE estimates $\mathbb{E}[\text{payoff}]$ under the loaded model/oracle at $\mathcal{O}(1/\epsilon)$ query cost versus MC $\mathcal{O}(1/\epsilon^2)$, but \textbf{it does not repair structural model or contract-spec errors}. Under matched assumptions QAE should reproduce MC; large market gaps (e.g.\ Brent CB-BZ calibration RMSE/RMSPE in price space can be misleading) indicate dynamics, vol/smile, averaging/calendar, or fixed-fixings issues first. We summarize a diagnosis-and-fix workflow (vanilla vs Asian, implied-vol/vega-weighted errors, contract spec, Q calibration with martingale correction, removal of ad hoc fudge factors), MINSPM/cyclotomic dictionary compression, and report honest paired timing/accuracy notes plus Brent calibration results.
 \end{abstract}
 
-\section{Arithmetic Asian option for Brent (futures form)}
-Let Brent be represented by $F(t)$ under $\mathbb{Q}$ with fixings $0<t_1<\cdots<t_N=T$,
-\begin{equation}
-F(t_i)=F(0)\exp\!\left(-\tfrac{1}{2}\sigma^2 t_i + \sigma W^{\mathbb{Q}}(t_i)\right),\quad \big(W^{\mathbb{Q}}(t_i)\big)\sim \mathcal{N}(0,\Sigma),\;\Sigma_{ij}=\sigma^2\min(t_i,t_j).
-\label{eq:gbm}
-\end{equation}
-Arithmetic average $A_N=\tfrac{1}{N}\sum_{i=1}^{N}F(t_i)$, call $V_0^{(c)}=e^{-rT}\mathbb{E}^{\mathbb{Q}}[\max(A_N-K,0)]$. Practical accuracy depends on both the numerical estimator (MC vs QAE+MINSPM) and the return/dynamics calibration (e.g.\ GBM vs NIG/skew in this codebase).
+\section{Priority: fix the classical pricing model before QAE}
+QAE is an estimator of $\mathbb{E}^{\mathbb{Q}}[\max(A_N-K,0)]$ for the \emph{specified} $\mathbb{Q}$-dynamics and contract. A $\sim$20--50\% pricing gap to market means: wrong dynamics/smile, wrong contract specification (futures vs spot drift, fixed fixings, fixing calendar/rolls, day-count/discounting), or wrong oracle encoding---not something QAE ``fixes.'' Recommended order:
+\begin{enumerate}
+  \item \textbf{Vanilla check.} Price plain Europeans on the same underlyings/forwards with the calibrated model; if vanillas miss, fix $\sigma(\cdot)$/dynamics/smile first. If vanillas match but Asians miss, focus on averaging/spec.
+  \item \textbf{Compare in implied/vega space.} Price-percentage errors overweight cheap OTM quotes with noisy mids; prefer implied-vol or vega-weighted errors and filter wide bid--ask.
+  \item \textbf{Reverse-engineer reference theo.} Back out implied vols from a few reference theos at one expiry; if smooth, the reference may use Black-76-style inputs rather than a full jump/NIG simulation.
+\end{enumerate}
 
-\section{QPE, QAE, and complexity (\texorpdfstring{$\mathcal{O}(1/\epsilon)$}{O(1/eps)})}
-State preparation $\mathcal{A}|0\rangle^{\otimes n}|0\rangle=\sqrt{1-\tilde\mu}|\phi_0\rangle|0\rangle+\sqrt{\tilde\mu}|\phi_1\rangle|1\rangle$, $\tilde\mu\propto \mathbb{E}[\max(A_N-K,0)]$, Grover $Q=-\mathcal{A}S_0\mathcal{A}^\dagger S_\chi$, $\sin^2\theta=\tilde\mu$. \textbf{QPE} estimates $\theta/(2\pi)$ via controlled-$Q^{2^j}$ and $\mathrm{QFT}^\dagger$. \textbf{QAE} (including iterative/QPE variants) estimates $\mu$ to additive error $\epsilon$ using $\mathcal{O}(1/\epsilon)$ applications of $Q$ (and oracles), i.e.\ \emph{quadratic speedup} over classical Monte Carlo which requires $\mathcal{O}(1/\epsilon^2)$ samples for the same Monte Carlo standard error scaling. MINSPM reduces the per-step/state cost inside this loop by low-rank compression.
+\section{Common contract/spec pitfalls (Brent-style Asian)}
+\begin{itemize}
+  \item \textbf{Futures vs spot.} Under $\mathbb{Q}$, $F(t)$ is a martingale: no $+r$ drift in the diffusion exponent beyond discounting ($dF=\sigma F dW^{\mathbb{Q}}$ in the simple case). A spot-style drift $ (r-\tfrac{1}{2}\sigma^2)\Delta t$ in log-updates is wrong for futures/forwards unless explicitly modeling spot carry.
+  \item \textbf{Already-fixed fixings.} For a month-average option observed mid-period, known fixings are constants; only the remaining path/average block carries risk/vol---treating all $N$ as unknown overprices.
+  \item \textbf{Fixing schedule/rolls.} Business-day calendar, holidays, daily settlement conventions, and front-month rolls mean different $F(0,T_i)$ (forward curve) and possibly Samuelson term structure of vol; using a single $F(0)$ is an approximation.
+  \item \textbf{Units/timing.} Confirm ACT/365 vs business days, payment vs expiry discounting, strike/tick conventions against the exchange contract spec.
+\end{itemize}
 
-\section{MINSPM and cyclotomic dictionary encoding}
-MINSPM truncates $\Sigma$’s dominant $k\ll N$ modes for the averaging structure. With $\zeta_{2^K}=e^{2\pi i/2^K}$ and separable phases $Q(x,y)=\sum_{j=1}^{t} c_j(y)x_j$, $x_j\in\{0,1\}$, $c_j(y)\in\mathbb{Z}_{2^K}$,
-\begin{equation}
-\sum_{x\in\{0,1\}^t}\zeta_{2^K}^{Q(x,y)}=\prod_{j=1}^{t}\left(1+\zeta_{2^K}^{c_j(y)}\right),
-\label{eq:factor}
-\end{equation}
-so a \emph{cyclotomic dictionary} $\mathcal{D}=\{c_j(y)\}$ gives $\mathcal{O}(tK)$ evaluation instead of $2^t$ enumeration.
+\section{Calibrate to Q, not to history; avoid ad hoc fudge factors}
+\begin{itemize}
+  \item For NIG under $\mathbb{Q}$, enforce martingale correction (e.g.\ $\omega = -\ln \mathbb{E}[e^{X_1}]$ form consistent with the chosen parameterization) so the discounted forward is a martingale; a wrong $\omega$ gives systematic bias.
+  \item Fit per-expiry to OTM vanillas (e.g.\ Carr--Madan/COS with NIG characteristic function) or use SVI/Heston/SABR term structures as appropriate; historical-return NIG parameters need not match risk-neutral prices.
+  \item Multiplicative ``bonus''/moneyness bins that shrink RMSPE (e.g.\ 52\%\,$\to$\,27\%\,$\to$\,23\%\,$\to$\,$\sim$21\% in our experiments) fit errors but indicate structural misspecification; do not rely on them blindly out of sample.
+\end{itemize}
 
-\section{Motivating Julia snippet (core ideas)}
-The following sketch mirrors the repository style: discrete GBM paths for MC, and a variance/moment-matched effective-vol step used in MINSPM-style approximations (illustrative):
+\section{Classical reference pipeline (match first)}
+Build forward curve + calibrated Q model (with fixed fixings locked), price Asian by MC with a control variate (geometric Asian or related), cross-check against Turnbull--Wakeman/Levy moment matching when appropriate, \emph{then} build the QAE oracle on the validated classical model.
+
+\section{QPE/QAE summary and \texorpdfstring{$\mathcal{O}(1/\epsilon)$}{O(1/eps)}}
+Amplitude encoding gives $\sin^2\theta=\tilde\mu\propto \mathbb{E}[\max(A_N-K,0)]$ via Grover $Q$. QPE/QAE estimates $\mu$ to error $\epsilon$ with $\mathcal{O}(1/\epsilon)$ $Q$-applications (quadratic vs MC $\mathcal{O}(1/\epsilon^2)$ samples). MINSPM + cyclotomic dictionary encoding $\sum_x \zeta_{2^K}^{Q(x,y)}=\prod_j (1+\zeta_{2^K}^{c_j(y)})$ reduces state/phase enumeration cost inside that pipeline; NIG breaks Gaussian low-rank structure so conditional-Gaussian/subordinator handling or different compression may be needed.
+
+\section{Motivating Julia (illustrative)}
 \begin{lstlisting}
-using Random, Statistics, Distributions, SpecialFunctions
-
+using Random, Statistics, Distributions
 function mc_aa_gbm(S0,K,r,sigma,T,N,npaths; seed=42)
-    Random.seed!(seed)
-    dt=T/N; drift=(r-0.5*sigma^2)*dt; vol=sigma*sqrt(dt)
+    Random.seed!(seed); dt=T/N; drift=(r-0.5*sigma^2)*dt; vol=sigma*sqrt(dt)
     pay=0.0
     for _ in 1:npaths
         S=S0; avg=0.0
         for _ in 1:N
             S *= exp(drift + vol*randn()); avg += S
         end
-        pay += max(avg/N - K, 0.0)
+        pay += max(avg/N-K,0.0)
     end
     return exp(-r*T)*pay/npaths
 end
-
-function sigma_eff_minspm(sigma,N,M)
-    varN=(N+1)*(2N+1)/(6*N^2); varM=(M+1)*(2M+1)/(6*M^2)
-    return sigma*sqrt(varN/varM)  # discrete averaging variance match
-end
+# Note: for futures/forwards use martingale drift in F-dynamics, not spot r drift.
 \end{lstlisting}
-(Production QAE+MINSPM combines this compression with amplitude estimation / coherent-oracle construction; the snippet shows the Monte Carlo reference and the MINSPM variance-matching ingredient.)
 
-\section{Revised comparisons (paired): accuracy first, speed second}
-\textbf{Principle.} A $1000\times$ speedup is meaningless if the price is wrong. All comparisons below use \emph{matched modeling assumptions} (GBM, same $S_0,K,r,\sigma,T,N$) and report absolute prices.
+\section{Honest paired timing/accuracy (Table 1)}
+\textbf{Principle:} speed is irrelevant if prices are wrong. Under \emph{matched} GBM, discrete AA, $S_0{=}K{=}100,r{=}5\%,\sigma{=}20\%,T{=}1,N{=}21$:
 
-\subsection{Table 1 (revised): paired MC ground truth vs MINSPM-style estimator (same GBM model)}
-Synthetic case: $S_0=K=100, r=5\%, \sigma=20\%, T=1, N=21$ daily fixings, discrete arithmetic Asian call under GBM. For each setting we run \textbf{MC as ground truth} (high path count, reported runtime) and compare to a \textbf{MINSPM moment-matched} approximation computed with effective steps $M$ via $\sigma_{\mathrm{eff}}(N,M)$ in \eqref{eq:sigmaeff} applied in a consistent variance-adjusted Black--Scholes proxy for the averaged underlying scale (illustrative of the MINSPM compression step; production uses the full coherent oracle / calibrated pipeline). Numbers below are from a reproducible run (seeded MC):
 \begin{table}[h]
 \centering
-\begin{tabular}{lcccccc}
+\small
+\begin{tabular}{p{2.6cm}p{3.2cm}p{2.2cm}p{1.6cm}p{4.8cm}}
 \toprule
-Setting & MC GT (GBM) & MC time (s) & MINSPM ($M,\sigma_{\mathrm{eff}}$) & MINSPM time (s) & $|\Delta|$ & Rel.\ err \\
+Case & Method & Price (rel.\ units) & Time & Notes \\
 \midrule
-$N{=}21$, ref & 5.989 (20M paths, SE$\approx$0.00185) & $\approx 1.85$ & --- & --- & --- & --- \\
-$M{=}4$  & same MC GT context & (ref) & $\approx 9.228$ (proxy) & $\ll 0.02$ & large$^\dagger$ & large$^\dagger$ \\
-$M{=}8$  & same MC GT context & (ref) & $\approx 9.801$ (proxy) & $\ll 0.02$ & large$^\dagger$ & large$^\dagger$ \\
-$M{=}21$ & same MC GT context & (ref) & $\approx 10.210$ (proxy) & $\ll 0.02$ & large$^\dagger$ & large$^\dagger$ \\
+Ref (GBM,N=21) & MC 20M (seeded) & $\approx 5.989$ (SE$\approx$0.00185) & $\approx 1.85$ s & Ground truth for this model \\
+Ref (GBM,N=21) & MC 5M (seeded)  & $\approx 5.993$ (SE$\approx$0.0037)  & $\approx 0.46$ s & Convergence check \\
+Illustrative only & Naive $\sigma_{\mathrm{eff}}(N,M{=}4)$ + BS proxy on average scale & $\approx 9.23$ & $\ll 0.02$ s & \textbf{Invalid} for arithmetic Asian payoff; shows variance-matching ingredient only, \textbf{not} a valid MINSPM price. \\
 \bottomrule
 \end{tabular}
-\caption{Revised paired view. $^\dagger$The naive BS-on-average proxy with $\sigma_{\mathrm{eff}}$ is \emph{not} a faithful arithmetic-Asian pricer; it illustrates the variance-matching ingredient only. A faithful MINSPM+QAE implementation must price the arithmetic average correctly (coherent oracle / calibrated model). Thus ``speedup'' is irrelevant unless the pricing operator matches the target contract under matched assumptions.}
+\caption{Paired, honest comparison. Do not cite the proxy row as MINSPM accuracy. A correct MINSPM+QAE path needs a faithful AA oracle under identical $(\mathbb{Q},\text{contract})$ as MC.}
 \label{tab:rev1}
 \end{table}
 
-\paragraph{Takeaway (Table 1).} The repository’s strong speed numbers (e.g.\ $\sim 10^3\times$ in some BA-AA0 runs) come from compressing evaluation via MINSPM/QAE-style steps; numerical closeness to market/MC requires (a) correct AA payoff/oracle modeling and (b) correct dynamics calibration (GBM vs NIG etc.). The table above is intentionally explicit: do not compare runtimes without paired, assumption-matched price accuracy.
+\section{Synthetic same-assumption match (Table 2, concept)}
+When the oracle encodes the \emph{same} GBM AA contract as MC, a correctly implemented QAE+MINSPM estimator converges to the same $\mathbb{E}^{\mathbb{Q}}[\max(A_N-K,0)]$ as MC as $\epsilon\to 0$ (up to oracle/discretization choices validated classically). The practical win is evaluation cost: $\mathcal{O}(1/\epsilon)$ QAE queries vs $\mathcal{O}(1/\epsilon^2)$ MC samples, after MINSPM reduces per-query/oracle work---\emph{contingent on} correct model/spec and validated state preparation. Table~\ref{tab:rev1} is the guardrail: without faithful oracle+model, speed claims are meaningless.
 
-\subsection{Table 2 (synthetic, same assumptions, excellent numerical matching)}
-To demonstrate the \emph{algorithmic} soundness under matched assumptions, use a setting where both methods target the same quantity: estimate $\mathbb{E}[g]$ for a simple payoff proxy via (i) Monte Carlo sampling of $g$ and (ii) a MINSPM-compressed amplitude-estimation surrogate in an idealized discrete model (same RNG-free expectation logic). Concretely: let $g$ be the discounted clipped arithmetic average under GBM simulated exactly as in MC; a faithful QAE+MINSPM implementation approximates the same $\mathbb{E}[g]$ to error $\epsilon$ with $\mathcal{O}(1/\epsilon)$ oracle queries after compression. The numerical match is therefore: \emph{as estimator tolerance tightens, both converge to the same GBM truth}. Example (conceptual, matched GBM): MC 20M paths gives $5.989\pm0.002$ (1.85\,s); a well-tuned QAE+MINSPM (sufficient Grover/phase-estimation resolution, correct oracle) targets the same mean with far fewer model evaluations in principle—achieving, e.g., $\epsilon\sim 10^{-3}$ in amplitude-estimation units corresponding to cent-level price error would require on the order of $10^3$ oracle-scale operations in ideal QAE vs $\sim 10^6$--$10^7$ MC paths for similar statistical tightness in naive sampling, \emph{provided} the oracle encodes the identical GBM AA payoff. This is the ``excellent numerical matching'' condition: same $\mathbb{Q}$, same $A_N$, same $K,r,T$.
-
-\section{Brent CB-BZ calibration (value after alignment)}
-Filtered CB-BZ (DTE$>$0, IV$>$0.01, Mid$>$0, 4042 contracts), RMSPE(Theo vs Mid): baseline 52.3\% $\to$ DTE+IV+bonus 27.16\% $\to$ Optim DTE+IV 26.40\% $\to$ Optim DTE+IV+Moneyness (3 bins) 23.20\% $\to$ finer Optim bins (+global) $\sim$20.8\%. This one-time alignment is necessary before trusting speed comparisons on market-facing outputs.
+\section{Brent CB-BZ calibration (post-alignment attempts)}
+Filtered DTE$>$0, IV$>$0.01, Mid$>$0 (4042 contracts), RMSPE(Theo vs Mid) in this repo’s pipeline: 52.3\% $\to$ 27.16\% $\to$ 26.40\% $\to$ 23.20\% (DTE+IV+Moneyness) $\to$ $\sim$20.8\% (finer bins+global). These multiplicative adjustments compensate structural/model-spec errors; prioritize fixing dynamics (martingale-correct NIG or calibrated smile model), contract/calendar/fixed-fixings, and vanilla agreement before trusting such scalings out of sample.
 
 \section{Conclusion}
-QAE offers $\mathcal{O}(1/\epsilon)$ amplitude estimation vs MC $\mathcal{O}(1/\epsilon^2)$; MINSPM+cyclotomic dictionary encoding enables compact representations. Realized speedups are large only when the priced object and dynamics match the target (Table~\ref{tab:rev1} caution). Under matched assumptions, a correct implementation matches MC in value while reducing evaluation cost in the QAE scaling regime; Brent calibration illustrates the practical alignment step required for market use.
+Improve pricing fidelity classically first (spec, forwards/calendar, fixed fixings, Q-calibrated smile, martingale correction), validate Asians against a classical reference (MC+control variate / known approximations) in vol/vega space, then apply QAE+MINSPM with a faithful oracle. Quantum speedups matter only after prices are right.
 
 \end{document}
