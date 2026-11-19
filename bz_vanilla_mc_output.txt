@@ -1,0 +1,12 @@
+====================================================================================================
+BZ Vanilla Regression Testcase: Monte Carlo Golden Values (100M paths)
+====================================================================================================
+
+Running MC for BZ_VAN_50 (S0=92.28, K=50.00, r=4.50%, σ=28.0%, T=0.0000)...
+Warning: detected a stack overflow; program state may be corrupted, so further execution might be unreliable.
+ERROR: LoadError: StackOverflowError:
+Stacktrace:
+ ┌    [1] LCG(seed::Int64)
+ │      @ Main ~/PROGRAMS/QUANTUM/bz_vanilla_mc_golden.jl:26
+ ╰─────── repeated 79984 times
+in expression starting at /home/skoranne/PROGRAMS/QUANTUM/bz_vanilla_mc_golden.jl:146

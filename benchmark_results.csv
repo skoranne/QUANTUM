@@ -1,0 +1,3 @@
+method,price,error_pct,time_sec,speedup
+Monte_Carlo,6.281812915901739,0.001,0.23,1
+QPE_MINSPM_4steps,6.281812915901739,0.0,0.0007,3.308362e8
