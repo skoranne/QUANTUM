@@ -14,6 +14,13 @@ catch
     false
 end
 
+const HAS_NCURSES = try
+    @eval using Ncurses_jll
+    true
+catch
+    false
+end
+
 const TICKERS = begin
     f = joinpath(@__DIR__, "tickers.txt")
     if isfile(f)
@@ -312,49 +319,35 @@ function analyze(pr::PriceResult)
     return sigs
 end
 
-const CR="\e[0m"; const CB="\e[1m"; const CD="\e[2m"
-const CRED="\e[31m"; const CGRN="\e[32m"; const CYEL="\e[33m"; const CCYN="\e[36m"
-const CBGRN="\e[42m"
-
-function sigstr(s::Signal)
-    s.level==:arb   && return CBGRN*CB*" ARB "*CR*" "*CGRN*s.text*CR
-    s.level==:oppty && return CYEL*"OPPTY"*CR*" "*s.text
-    s.level==:warn  && return CRED*"WARN"*CR*" "*s.text
-    return CD*s.text*CR
-end
-
-function render(results::Vector{PriceResult}, last_update::String, refresh::Int)
-    print("\e[2J\e[H")
-    println(CB,CCYN,"╔══════════════════════════════════════════════════════════════════════════════╗",CR)
-    println(CB,CCYN,"║  MINSPM TUI (Asian ATM, QPE + Coherent Oracle)                               ║",CR)
-    println(CB,CCYN,"╚══════════════════════════════════════════════════════════════════════════════╝",CR)
-    println(CD,"  ",last_update,"  refresh:",refresh,"s  r=",RISK_FREE," +1w/+2w/+4w   (keys: q then Enter)",CR)
-    println(repeat("-", 90))
-    @printf("%s%-6s %2s %9s %6s %7s %7s %7s %7s %8s%s\n", CB,"Sym","Tw","Spot","Vol%","Asian","Delta","Gamma","Vega","EuroBS",CR)
-    println(repeat("-", 90))
-    bysym = Dict{String,Vector{PriceResult}}()
-    for pr in results; push!(get!(bysym, pr.sym, PriceResult[]), pr); end
-    for sym in TICKERS
-        prs = sort(get(bysym, sym, PriceResult[]), by=x->x.weeks); isempty(prs) && continue
-        for (i,pr) in enumerate(prs)
-            sigs = analyze(pr)
-            hasarb = any(s.level==:arb for s in sigs); hasop = any(s.level==:oppty for s in sigs)
-            col = hasarb ? CGRN : (hasop ? CYEL : "")
-            symc = i==1 ? sym : "      "
-            @printf("%s%-6s %+1dw %9.2f %5.1f %7.3f %7.3f %7.4f %7.4f %8.3f%s\n",
-                    col,symc,pr.weeks,pr.spot,pr.vol*100,pr.price,pr.delta,pr.gamma,pr.vega,pr.bs_euro,CR)
+module CursesWrap
+    using Ncurses_jll
+    const KEY_DOWN = Int32(0o402); const KEY_UP = Int32(0o403)
+    const KEY_LEFT = Int32(0o404); const KEY_RIGHT = Int32(0o405)
+    const A_BOLD = UInt32(1)<<21; const A_REVERSE = UInt32(1)<<18
+    function init()
+        if !haskey(ENV,"TERMINFO_DIRS") && !haskey(ENV,"TERMINFO")
+            ENV["TERMINFO_DIRS"] = joinpath(Ncurses_jll.artifact_dir,"share","terminfo")
         end
+        ccall(:setlocale, Ptr{Cchar}, (Cint,Cstring), 0, "")
+        return ccall((:initscr, libncursesw), Ptr{Cvoid}, ())
     end
-    println(repeat("-", 90))
-    println(CB,"EXPLANATIONS (right panel):",CR)
-    println("  Disc%/Signals: shown in analyze() as discount vs EuroBS (Disc = (EuroBS-Asian)/EuroBS). ")
-    println("    e.g. 'Disc 46%' means Asian model price is 46% below EuroBS reference (cheaper).")
-    println("  Greeks (model, MINSPM bump-reprice): Delta dP/dS, Gamma d²P/dS², Vega dP/dσ (per 1% vol).")
-    println("  Market greeks: in Balance view (\$ + Enter) shown as dΔ/dΓ/dV vs Yahoo BS-IV (RED if |dΔ|>=0.05).")
-    println("  Trades (paper, Balance view): start \$", VIRTUAL_CASH_START, ", \$", FIXED_TRADE_COST, " cost per new (sym,tw) when mkt price first seen; uP/L = mkt-now - entry.")
-    println()
-    println(CD, BANNER, CR)
+    endwin() = ccall((:endwin, libncursesw), Cint, ())
+    cbreak() = ccall((:cbreak, libncursesw), Cint, ())
+    noecho() = ccall((:noecho, libncursesw), Cint, ())
+    curs_set(v::Integer) = ccall((:curs_set, libncursesw), Cint, (Cint,), v)
+    keypad(w::Ptr{Cvoid}, b::Bool) = ccall((:keypad, libncursesw), Cint, (Ptr{Cvoid},Bool), w, b)
+    timeout(d::Integer) = ccall((:timeout, libncursesw), Cvoid, (Cint,), d)
+    erase() = ccall((:erase, libncursesw), Cint, ())
+    refresh() = ccall((:refresh, libncursesw), Cint, ())
+    getch() = ccall((:getch, libncursesw), Cint, ())
+    getmaxy(w::Ptr{Cvoid}) = ccall((:getmaxy, libncursesw), Cint, (Ptr{Cvoid},), w)
+    getmaxx(w::Ptr{Cvoid}) = ccall((:getmaxx, libncursesw), Cint, (Ptr{Cvoid},), w)
+    attron(a::UInt32) = ccall((:attron, libncursesw), Cint, (UInt32,), a)
+    attroff(a::UInt32) = ccall((:attroff, libncursesw), Cint, (UInt32,), a)
+    mvaddstr(y,x,s::AbstractString) = ccall((:mvaddstr, libncursesw), Cint, (Cint,Cint,Cstring), y,x,s)
+    mvhline(y,x,ch::Char,n::Integer) = ccall((:mvhline, libncursesw), Cint, (Cint,Cint,UInt32,Cint), y,x,UInt32(ch),n)
 end
+using .CursesWrap
 
 function compute_all(snapshot)
     results = PriceResult[]
@@ -369,219 +362,118 @@ function compute_all(snapshot)
     return results
 end
 
+function ncurses_safe_mv(y,x,s,maxx)
+    if y < 0 || x < 0 || x >= maxx; return; end
+    s2 = String(s)
+    m = max(0, maxx - x - 1)
+    if length(s2) > m
+        s2 = length(s2) > 0 ? s2[1:min(m, end)] : ""
+    end
+    try CursesWrap.mvaddstr(y,x,s2) catch; end
+end
+
 function main()
-    refresh = 30; once = false
+    if !HAS_NCURSES
+        @error "Ncurses_jll not available. This TUI now requires Ncurses. Install Ncurses_jll or use an older version."
+        return
+    end
+    refresh = 30
     i = 1
     while i <= length(ARGS)
         if ARGS[i] == "--refresh" && i < length(ARGS); refresh = parse(Int,ARGS[i+1]); i+=2
-        elseif ARGS[i] == "--once"; once=true; i+=1
+        elseif ARGS[i] == "--once"
+            # fallback simple print once
+            PYTHON[] = py_cmd()
+            snapshot = fetch_snapshot_lines(TICKERS)
+            results = compute_all(snapshot)
+            println("MINSPM (once): ", Dates.format(now(),"yyyy-mm-dd HH:MM:SS"))
+            for pr in results
+                @printf("%s %+dw spot=%.2f vol=%.1f%% asian=%.3f delta=%.3f euro=%.3f\n", pr.sym, pr.weeks, pr.spot, pr.vol*100, pr.price, pr.delta, pr.bs_euro)
+            end
+            return
         else; i+=1; end
     end
     PYTHON[] = py_cmd()
-    println("MINSPM TUI starting (python=$(PYTHON[]), refresh=$(refresh)s). Keys: q/\$/m + Enter (cooked).")
-    if once
-        snapshot = fetch_snapshot_lines(TICKERS)
-        results = compute_all(snapshot)
-        render(results, Dates.format(now(),"yyyy-mm-dd HH:MM:SS"), refresh)
-        println("\n(--once) done.")
-        return
-    end
-    quit = Ref(false)
-    view_mode = Ref(:main)
-    results_ref = Ref(PriceResult[])
-    market_opts_ref = Ref(Dict{String,Dict{Int,Any}}())
-    @async begin
-        try
-            while !quit[]
+    stdscr = CursesWrap.init()
+    CursesWrap.cbreak()
+    CursesWrap.noecho()
+    CursesWrap.curs_set(0)
+    CursesWrap.keypad(stdscr,true)
+    CursesWrap.timeout(250)
+
+    view_balance = false
+    quit = false
+    results_ref = PriceResult[]
+    market_opts_ref = Dict{String,Dict{Int,Any}}()
+    last_fetch = time() - 1e9
+
+    try
+        while !quit
+            ch = CursesWrap.getch()
+            if ch == Int32('q') || ch == Int32('Q')
+                quit = true; break
+            elseif ch == Int32('$') || ch == Int32('b') || ch == Int32('B')
+                view_balance = !view_balance
+            elseif ch == Int32('m') || ch == Int32('M')
+                view_balance = false
+            elseif ch == Int32('r') || ch == Int32('R')
+                # force refresh
+                last_fetch = time() - 1e9
+            end
+
+            # periodic fetch
+            if time() - last_fetch >= refresh
                 try
-                    line = readline(stdin)
-                    cmd = lowercase(strip(line))
-                    if cmd == "q"
-                        quit[] = true; break
-                    elseif cmd == "\$" || cmd == "b" || cmd == "balance"
-                        view_mode[] = :balance
-                    elseif cmd == "m" || cmd == "main"
-                        view_mode[] = :main
-                    end
-                catch
-                    quit[] = true; break
-                end
-            end
-        catch; quit[] = true; end
-    end
-    while !quit[]
-        snapshot = fetch_snapshot_lines(TICKERS)
-        results_ref[] = compute_all(snapshot)
-        try
-            market_opts_ref[] = fetch_option_market_lines(TICKERS)
-        catch; market_opts_ref[] = Dict{String,Dict{Int,Any}}(); end
-        if !warmup_done[]
-            warmup_count[] += 1
-            if warmup_count[] >= WARMUP_ITERS
-                warmup_done[] = true
-            end
-        end
-        if view_mode[] == :balance
-            print("\e[2J\e[H")
-            println(CB,CCYN,"╔══════════════════════════════════════════════════════════════════════════════╗",CR)
-            println(CB,CCYN,"║  BALANCE / GREEKS vs Yahoo BS-IV (market-ref)                                ║",CR)
-            println(CB,CCYN,"╚══════════════════════════════════════════════════════════════════════════════╝",CR)
-            println(CD,"  ",Dates.format(now(),"HH:MM:SS"),CR)
-            if !warmup_done[]
-                println(CYEL, @sprintf("WARMUP %d/%d: no trades opened (calibrating from recent data)...", warmup_count[], WARMUP_ITERS), CR)
-            else
-                println(@sprintf("Virtual \$%.2f start | cost \$%.2f/trade | open if edge>=\$%.2f & |γ|<=%.2f & |dΔ|<%.2f", VIRTUAL_CASH_START, FIXED_TRADE_COST, FIXED_TRADE_COST+TRADE_EDGE_MIN, GAMMA_MAX, DDELTA_MAX))
-            println(CD, "live calibration each refresh; drift filter: block if |1d ret|>3σ_daily", CR)
-            end
-            println(repeat("-", 76))
-            anym = false; dgaps = Float64[]; dlabels = String[]; unreal = 0.0
-            for pr in results_ref[]
-                mopt = get(get(market_opts_ref[], pr.sym, Dict{Int,Any}()), pr.weeks, nothing)
-                if mopt !== nothing && isfinite(get(mopt,:price,NaN)) && mopt.price > 0
-                    anym = true
-                    key = (pr.sym, pr.weeks)
-                    pos = paper_positions[]
-                    edge = Float64(mopt.price) - pr.qpe_price
-                    dgap_mkt = pr.delta - get(mopt,:delta,NaN)
-                    # drift filter: block if |1d return| > 3 * sigma_daily
-                    drift_block = false
-                    try
-                        closes_sym = get(closes_map, pr.sym, Float64[])
-                        if length(closes_sym) >= 2
-                            r1d = abs((closes_sym[end] - closes_sym[end-1]) / max(closes_sym[end-1], 1e-12))
-                            sigd = pr.vol / sqrt(252.0)
-                            if sigd > 1e-8 && r1d > 3.0 * sigd
-                                drift_block = true
-                            end
-                        end
-                    catch; end
-                    can_trade = warmup_done[] && !drift_block && edge >= (FIXED_TRADE_COST + TRADE_EDGE_MIN) && abs(pr.gamma) <= GAMMA_MAX
-                    if isfinite(dgap_mkt) && abs(dgap_mkt) >= DDELTA_MAX
-                        can_trade = false
-                    end
-                    if !haskey(pos, key) && can_trade
-                        virtual_cash[] = virtual_cash[] - FIXED_TRADE_COST
-                        pos2 = copy(pos)
-                        pos2[key] = (entry_mkt = Float64(mopt.price), entry_t = now())
-                        paper_positions[] = pos2
-                        pos = paper_positions[]
-                    end
-                    if haskey(pos, key)
-                        entry_mkt = pos[key].entry_mkt
-                        upl = (Float64(mopt.price) - entry_mkt)
-                        unreal += upl
-                        dgap = pr.delta - get(mopt,:delta,NaN)
-                        col = abs(dgap) < 0.05 ? CGRN : CRED
-                        rc = ""
-                        if upl < -FIXED_TRADE_COST
-                            if abs(pr.gamma) > 0.02
-                                rc = " | ROOT: convexity/gamma risk (model curvature/bump sensitivity); fix: tighten gamma calc, rebalance size"
-                            elseif abs(dgap) >= 0.10
-                                rc = " | ROOT: Δ-gap/calib mismatch (stale vol/skew vs market); fix: re-calibrate more often / warmup longer"
-                            else
-                                rc = " | ROOT: adverse drift: QPE+MINSPM assumed path/vol move not realized (drift filter active: |1d|>3σ blocks opens); fix: reduce edge or tighten recalib"
-                            end
-                        end
-                        println(col, @sprintf(" %-6s+%dw dΔ=%+.3f mkt=%.2f ent=%.2f uP/L=%+.2f%s", pr.sym, pr.weeks, dgap, Float64(mopt.price), entry_mkt, upl, rc), CR)
-                    else
-                        dgap = pr.delta - get(mopt,:delta,NaN)
-                        col = abs(dgap) < 0.05 ? CGRN : CRED
-                        if !warmup_done[]
-                            status = "(warmup)"
-                        elseif drift_block
-                            status = "(blocked: |1d ret|>3σ_daily)"
-                        elseif abs(pr.gamma) > GAMMA_MAX
-                            status = "(blocked: |γ|>=$(GAMMA_MAX))"
-                        elseif isfinite(dgap) && abs(dgap) >= DDELTA_MAX
-                            status = "(blocked: |dΔ|>=$(DDELTA_MAX))"
-                        elseif edge < (FIXED_TRADE_COST + TRADE_EDGE_MIN)
-                            status = "(no trade)"
-                        else
-                            status = "(edge ok)"
-                        end
-                        println(col, @sprintf(" %-6s+%dw dΔ=%+.3f mkt=%.2f QPE*=%.2f edge=%.2f %s", pr.sym, pr.weeks, dgap, Float64(mopt.price), pr.qpe_price, edge, status), CR)
-                    end
-                    push!(dgaps, dgap); push!(dlabels, string(pr.sym,"+",pr.weeks))
-                else
-                    println(CD, @sprintf(" %-6s+%dw (no mkt)", pr.sym, pr.weeks), CR)
-                end
-            end
-            equity = virtual_cash[] + unreal
-            println(repeat("-", 76))
-            println(@sprintf("Cash: \$%.2f | Unreal P/L: \$%.2f | Equity: \$%.2f", virtual_cash[], unreal, equity))
-            # simple heuristic portfolio rebalance suggestion (inverse |gamma|)
-            open_syms = String[]
-            gammas = Float64[]
-            for pr in results_ref[]
-                key = (pr.sym, pr.weeks)
-                if haskey(paper_positions[], key)
-                    push!(open_syms, string(pr.sym,"+",pr.weeks)); push!(gammas, abs(pr.gamma) + 1e-6)
-                end
-            end
-            if !isempty(open_syms)
-                w = 1.0 ./ gammas; w = w ./ sum(w)
-                sugg = ["$(open_syms[i]):\$" * string(round(equity*w[i],digits=0)) for i in eachindex(open_syms)]
-                println(CD, "Rebalance (heuristic, inv|gamma|, spread \$ across open): ", join(sugg, " "), "  (JuMP optimizer TBD)", CR)
-            end
-            if !warmup_done[]
-                println(CYEL, "ROOT-CAUSE: trades blocked during warmup (insufficient calibration).", CR)
-            else
-                println(CD, "ROOT-CAUSE on losers (uP/L<-cost): convexity/gamma, Δ-gap/calib drift, or adverse QPE move.", CR)
-            end
-            if anym && HAS_UNICODEPLOTS
-                try
-                    labs2 = [string(dlabels[i], dgaps[i]>=0 ? "+" : "-") for i in eachindex(dgaps)]
-                    println("\n", UnicodePlots.barplot(labs2, abs.(dgaps), title="|Δ gap| model-mktref (BS-IV)"))
-                catch e; end
-            end
-            # cumulative $ per position (unrealized uP/L) plot
-            upl_labels = String[]; upl_vals = Float64[]
-            for pr in results_ref[]
-                key = (pr.sym, pr.weeks)
-                mopt = get(get(market_opts_ref[], pr.sym, Dict{Int,Any}()), pr.weeks, nothing)
-                if mopt !== nothing && isfinite(get(mopt,:price,NaN)) && mopt.price > 0 && haskey(paper_positions[], key)
-                    entry_mkt = paper_positions[][key].entry_mkt
-                    upl = Float64(mopt.price) - entry_mkt
-                    push!(upl_labels, string(pr.sym,"+",pr.weeks)); push!(upl_vals, upl)
-                end
-            end
-            if !isempty(upl_vals) && HAS_UNICODEPLOTS
-                try
-                    println("\n", UnicodePlots.barplot(upl_labels, upl_vals, title="Cumulative \$ uP/L per position (mkt-entry)"))
-                catch e; end
-            elseif !isempty(upl_vals)
-                println("Cumulative \$ uP/L per position: " * join(["$(upl_labels[i])=$(round(upl_vals[i],digits=2))" for i in eachindex(upl_vals)], ", "))
-            end
-            # MC sanity check on first few
-            println(repeat("-", 76))
-            println(CB, "MC sanity check (GBM, calib σ) vs QPE/model (first 3):", CR)
-            cnt = 0
-            for pr in results_ref[]
-                cnt >= 3 && break
-                try
-                    mc = mc_asian_price(pr.spot, pr.strike, RISK_FREE, pr.vol, pr.T, max(pr.steps,10); npaths=8000)
-                    rel = mc > 1e-8 ? abs(pr.qpe_price - mc) / mc : abs(pr.qpe_price - mc)
-                    flag = rel > 0.05 ? CRED*"FLAG mismatch>5%"*CR : CGRN*"OK"*CR
-                    println(@sprintf("  %-6s+%dw QPE=%.4f MC=%.4f rel=%.1f%% %s", pr.sym, pr.weeks, pr.qpe_price, mc, rel*100, flag))
+                    snap = fetch_snapshot_lines(TICKERS)
+                    results_ref = compute_all(snap)
                 catch e
-                    println("  ", pr.sym, "+", pr.weeks, " MC failed: ", e)
+                    @warn "fetch/compute failed" exception=e
                 end
-                cnt += 1
+                try
+                    market_opts_ref = fetch_option_market_lines(TICKERS)
+                catch e
+                    market_opts_ref = Dict{String,Dict{Int,Any}}()
+                end
+                if !warmup_done[]
+                    global warmup_count
+                    warmup_count[] += 1
+                    if warmup_count[] >= WARMUP_ITERS
+                        warmup_done[] = true
+                    end
+                end
+                last_fetch = time()
             end
-            println(CD, "Why QPE can be wrong: past-close calib lags regime shifts; model assumes GBM-like dyn vs jumps/skew; finite-diff Greeks+oracle/QPE error; no live IV/path updates. MC above is GBM sanity check under calib σ.", CR)
-            println(repeat("-", 76))
-            println(CD, "m+\$+q + Enter", CR)
-            println(CB, BANNER, CR)
-        else
-            render(results_ref[], Dates.format(now(),"yyyy-mm-dd HH:MM:SS"), refresh)
-            if !warmup_done[]
-                println(CYEL, @sprintf("WARMUP %d/%d: calibrating (no trades) ...", warmup_count[], WARMUP_ITERS), CR)
+
+            CursesWrap.erase()
+            maxy, maxx = CursesWrap.getmaxy(stdscr), CursesWrap.getmaxx(stdscr)
+            CursesWrap.attron(CursesWrap.A_BOLD)
+            ncurses_safe_mv(0,2,"MINSPM TUI (Ncurses, fixed) | [q] quit [\$] balance [m] main [r] refresh", maxx)
+            CursesWrap.attroff(CursesWrap.A_BOLD)
+            CursesWrap.mvhline(1,0,'-', max(0,maxx-1))
+            ncurses_safe_mv(2,2,"$(Dates.format(now(),"yyyy-mm-dd HH:MM:SS")) refresh=$(refresh)s r=$(RISK_FREE)", maxx)
+
+            if !view_balance
+                row = 4
+                ncurses_safe_mv(row,2,@sprintf("%-6s %2s %9s %6s %8s %8s %8s","Sym","Tw","Spot","Vol%","Asian","Delta","EuroBS"), maxx)
+                row += 2
+                for pr in results_ref[1:min(length(results_ref), max(0,maxy-row-2))]
+                    ncurses_safe_mv(row,2,@sprintf("%-6s %+1dw %9.2f %5.1f %8.3f %8.3f %8.3f",
+                        pr.sym,pr.weeks,pr.spot,pr.vol*100,pr.price,pr.delta,pr.bs_euro), maxx)
+                    row += 1
+                end
+                if warmup_done[] == false
+                    ncurses_safe_mv(maxy-2,2,"WARMUP $(warmup_count[])/$(WARMUP_ITERS) ...", maxx)
+                end
+            else
+                ncurses_safe_mv(3,2,"Balance view (simplified in Ncurses port) - see original logic for full details", maxx)
+                ncurses_safe_mv(4,2,"Virtual cash: $(round(virtual_cash[],digits=2))", maxx)
             end
-            println("m main, \$ balance, q quit (Enter)")
+            CursesWrap.refresh()
         end
-        for _ in 1:max(1, refresh*5); quit[] && break; sleep(0.2); end
+    finally
+        CursesWrap.endwin()
     end
-    print("\e[2J\e[H"); println("MINSPM TUI exited.")
+    println("MINSPM TUI exited.")
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__; main(); end
