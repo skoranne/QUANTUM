@@ -462,11 +462,71 @@ function main()
                     row += 1
                 end
                 if warmup_done[] == false
-                    ncurses_safe_mv(maxy-2,2,"WARMUP $(warmup_count[])/$(WARMUP_ITERS) ...", maxx)
+                    ncurses_safe_mv(maxy-2,2,"WARMUP $(warmup_count[])/$(WARMUP_ITERS) ... calibrating", maxx)
                 end
             else
-                ncurses_safe_mv(3,2,"Balance view (simplified in Ncurses port) - see original logic for full details", maxx)
-                ncurses_safe_mv(4,2,"Virtual cash: $(round(virtual_cash[],digits=2))", maxx)
+                row = 3
+                ncurses_safe_mv(row,2,"BALANCE / market-ref view (Ncurses)", maxx); row += 1
+                if !warmup_done[]
+                    ncurses_safe_mv(row,2,"WARMUP $(warmup_count[])/$(WARMUP_ITERS): no trades opened", maxx); row += 1
+                else
+                    ncurses_safe_mv(row,2,@sprintf("Virtual \$%.2f | cost \$%.2f | edge>=\$%.2f", virtual_cash[], FIXED_TRADE_COST, FIXED_TRADE_COST+TRADE_EDGE_MIN), maxx); row += 1
+                end
+                row += 1
+                unreal = 0.0
+                shown = 0
+                for pr in results_ref
+                    mopt = get(get(market_opts_ref, pr.sym, Dict{Int,Any}()), pr.weeks, nothing)
+                    if mopt === nothing || !isfinite(get(mopt,:price,NaN)) || mopt.price <= 0
+                        continue
+                    end
+                    dgap = pr.delta - get(mopt,:delta,NaN)
+                    edge = Float64(mopt.price) - pr.qpe_price
+                    key = (pr.sym, pr.weeks)
+                    pos = paper_positions[]
+                    if haskey(pos, key)
+                        upl = Float64(mopt.price) - pos[key].entry_mkt
+                        unreal += upl
+                        line = @sprintf("%-6s+%dw dΔ=%+.3f mkt=%.2f ent=%.2f uP/L=%+.2f", pr.sym,pr.weeks,dgap,Float64(mopt.price),pos[key].entry_mkt,upl)
+                    else
+                        status = warmup_done[] ? (edge >= (FIXED_TRADE_COST+TRADE_EDGE_MIN) ? "edge_ok" : "no_trade") : "warmup"
+                        line = @sprintf("%-6s+%dw dΔ=%+.3f mkt=%.2f QPE=%.2f edge=%.2f %s", pr.sym,pr.weeks,dgap,Float64(mopt.price),pr.qpe_price,edge,status)
+                    end
+                    if row < maxy - 3
+                        ncurses_safe_mv(row,2,line, maxx)
+                        row += 1
+                        shown += 1
+                    end
+                end
+                row += 1
+                equity = virtual_cash[] + unreal
+                ncurses_safe_mv(row,2,@sprintf("Cash \$%.2f | Unreal \$%.2f | Equity \$%.2f (shown %d)", virtual_cash[], unreal, equity, shown), maxx); row += 1
+                # try to show a small unicode plot if space
+                if HAS_UNICODEPLOTS && row < maxy - 6 && shown > 0
+                    try
+                        upl_labels = String[]; upl_vals = Float64[]
+                        for pr in results_ref
+                            key = (pr.sym,pr.weeks)
+                            mopt = get(get(market_opts_ref, pr.sym, Dict{Int,Any}()), pr.weeks, nothing)
+                            if mopt !== nothing && isfinite(get(mopt,:price,NaN)) && haskey(paper_positions[], key)
+                                push!(upl_labels, "$(pr.sym)+$(pr.weeks)")
+                                push!(upl_vals, Float64(mopt.price) - paper_positions[][key].entry_mkt)
+                            end
+                        end
+                        if !isempty(upl_vals)
+                            plt = UnicodePlots.barplot(upl_labels, upl_vals, title="uP/L \$", width=min(40, maxx-4), height=min(8, maxy-row-2))
+                            io = IOBuffer(); show(IOContext(io,:color=>false), plt)
+                            splot = replace(String(take!(io)), r"\e\[[0-9;]*[a-zA-Z]" => "")
+                            for ln in split(splot, '\n')
+                                if row < maxy - 1
+                                    ncurses_safe_mv(row,2,ln,maxx); row += 1
+                                end
+                            end
+                        end
+                    catch e
+                        ncurses_safe_mv(row,2,"(plot unavailable)",maxx)
+                    end
+                end
             end
             CursesWrap.refresh()
         end
