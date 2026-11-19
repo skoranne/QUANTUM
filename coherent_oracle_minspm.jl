@@ -294,6 +294,97 @@ function mc_golden(S0,K,r,vol,skew,T,steps,bound_b; n_paths::Int=200_000, seed::
      price_unb=price_unb, se_unb=se_unb, t=tmc, n_paths=n_paths)
 end
 
+# ----------------------------- BA-specific utilities --------------------------
+"""
+BA (Brent Asian) contract adjustments:
+- Front-month BZ roll inside averaging month (diminishing balance)
+- Effective strike rescaling when mid-contract
+- Discounted upfront premium convention
+"""
+function ba_roll_front_month_bz(closes::Vector{Float64}, start_idx::Int, days_in_avg::Int)
+    # NYMEX BZ expires at end of month M-2; for month M averaging, front-month is M+2
+    # Roll from M+2 to M+3 at end of averaging month
+    # In practice: use the near-term BZ strip (first two contracts)
+    n = length(closes)
+    if start_idx + days_in_avg > n; return closes[start_idx:end]; end
+    subset = closes[start_idx:start_idx+days_in_avg-1]
+    # Simple approximation: no explicit roll needed if window < expiry
+    # More accurate would interpolate BZ futures strip based on calendar dates
+    subset
+end
+
+function ba_effective_strike(K_original::Float64, k::Int, realized_avg::Float64, N::Int)
+    # K_eff = (N*K - k*avg_k) / (N - k) for remaining N-k fixings
+    if k >= N; return K_original; end
+    (N * K_original - k * realized_avg) / (N - k)
+end
+
+function ba_discounted_premium(premium::Float64, r::Float64, T::Float64)
+    # BA settlement already includes discount factor e^{-rT}
+    # Return undiscounted expectation for comparison
+    premium * exp(r*T)
+end
+
+function ba_pricing_with_rolling(S0::Float64, K::Float64, r::Float64, vol::Float64, skew::Float64,
+                                  T::Float64, steps::Int, closes::Vector{Float64},
+                                  start_idx::Int=1)
+    """
+    BA-specific pricing with front-month BZ roll approximation and effective strike.
+    Returns: (qpe_price, mc_price, effective_strike, roll_adjustment)
+    """
+    N = steps  # total averaging days
+    k = max(0, start_idx - 1)  # days already fixed (0 if starting fresh)
+    
+    # Get the front-month BZ strip approximation
+    avg_window = ba_roll_front_month_bz(closes, start_idx, N)
+    
+    # If mid-contract, compute effective strike
+    K_eff = if k > 0 && k < N
+        # Need realized average of first k days
+        if length(avg_window) >= k
+            avg_k = mean(avg_window[1:min(k, end)])
+            ba_effective_strike(K, k, avg_k, N)
+        else
+            K  # fallback
+        end
+    else
+        K
+    end
+    
+    # Use the last spot from the rolling window
+    S_spot = length(avg_window) >= 1 ? avg_window[end] : S0
+    
+    # Compute vol from the full historical closes (for calibration consistency)
+    vol_cal, sk_cal = calibrate_1d(closes)
+    
+    Bnd = max(0.8*S_spot, 2*vol_cal*S_spot*sqrt(T))
+    
+    # Coherent oracle with adjusted inputs
+    base = coherent_oracle_moments(S_spot, K_eff, r, vol_cal, sk_cal, T, steps; bound_b=Bnd)
+    theta = asin(sqrt(clamp(base.a,1e-12,1.0-1e-12)))
+    _, a_ref = minspm_refined(theta, 1<<20, 1024)
+    qpe = a_ref * Bnd * exp(-r*T)
+    
+    # MC reference
+    dt = T/steps; drift=(r-0.5*vol_cal^2)*dt; vvol=vol_cal*sqrt(dt)
+    pay=0.0; nmc=200000
+    for _ in 1:nmc
+        St=S_spot; ssum=0.0
+        for _ in 1:steps
+            St *= exp(drift + vvol*randn())
+            ssum += St
+        end
+        pay += max(ssum/steps - K_eff, 0.0)
+    end
+    mc = exp(-r*T)*pay/nmc
+    
+    # Roll adjustment: difference from static BZ pricing
+    # (simplified - would need actual BZ futures strip for precise adjustment)
+    roll_adj = 0.0  # placeholder for full strip implementation
+    
+    (qpe_price=qpe, mc_price=mc, effective_strike=K_eff, roll_adjustment=roll_adj)
+end
+
 # ----------------------------- Run / compare -----------------------------------
 function run_case(label, prices_vec; S0=nothing,K=nothing,r=0.0415,T=1.0,steps=252,
                   n_mc=250_000,k_trunc=8,m_bits=24,u_classes=4096,target=0.001)
