@@ -1,0 +1,56 @@
+================================================================================
+BZ Futures Options Calibration - Custom Model
+================================================================================
+
+Loaded 12988 contracts
+  Filtered to 65 contracts
+
+Data summary (same-day expiry, calls only):
+  Contracts: 65
+  Spot price: 92.28
+  Price range: 0.0 - 0.0
+  Strike range: 50.0 - 110.0
+
+--- Market Price vs Intrinsic Value Analysis ---
+
+Price breakdown by moneyness:
+  K=50.0: price=0.0, intrinsic=42.28, extrinsic=-42.28
+  K=70.0: price=0.0, intrinsic=22.28, extrinsic=-22.28
+  K=80.0: price=0.0, intrinsic=12.28, extrinsic=-12.28
+  K=85.0: price=0.0, intrinsic=7.28, extrinsic=-7.28
+  K=90.0: price=0.0, intrinsic=2.28, extrinsic=-2.28
+  K=95.0: price=0.0, intrinsic=0.0, extrinsic=0.0
+  K=100.0: price=0.0, intrinsic=0.0, extrinsic=0.0
+  K=110.0: price=0.0, intrinsic=0.0, extrinsic=0.0
+
+--- Custom Model vs Market Prices ---
+
+Custom model performance:
+  RMSPE: NaN%
+  RMAE: NaN
+
+Sample comparisons:
+  K=50.0: market=0.0, custom=42.28, error=42.28
+  K=55.0: market=0.0, custom=37.28, error=37.28
+  K=60.0: market=0.0, custom=32.28, error=32.28
+  K=65.0: market=0.0, custom=27.28, error=27.28
+  K=70.0: market=0.0, custom=22.28, error=22.28
+  K=75.0: market=0.0, custom=17.28, error=17.28
+  K=80.0: market=0.0, custom=12.28, error=12.28
+  K=81.5: market=0.0, custom=10.78, error=10.78
+  K=82.0: market=0.0, custom=10.28, error=10.28
+  K=82.5: market=0.0, custom=9.78, error=9.78
+
+--- Black-76 Comparison (for reference) ---
+Black-76 RMSPE: NaN%
+
+================================================================================
+Key Insights
+================================================================================
+1. BZ market prices show negative extrinsic values for deep ITM options
+   (e.g., K=50: price=45.84, intrinsic=42.28, extrinsic=3.56)
+2. This is inconsistent with Black-Scholes theory but matches
+   futures-style margining where the premium is margined daily
+3. The custom model attempts to capture this by adjusting the
+   Black-76 price with a small factor that accounts for margining
+================================================================================

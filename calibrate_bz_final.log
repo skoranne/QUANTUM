@@ -1,0 +1,71 @@
+================================================================================
+BZ Futures Options Calibration - Final Analysis
+================================================================================
+
+Loaded 12988 contracts
+  Filtered to 236 contracts
+
+  Data characteristics:
+    Contracts: 236
+    Spot price: 92.28 (std: 0.0)
+    Price range: 0.025 - 3.195
+    Strike range: 70.0 - 122.0
+    IV range: 0.0609 - 0.9995
+    T range: 1.0 - 7.0 days
+
+--- Analysis of Market Price Patterns ---
+
+1. Intrinsic value analysis:
+   Call prices vs intrinsic:
+   K=97.0: price=0.385, intrinsic=0.0, diff=0.385
+   K=97.5: price=0.34, intrinsic=0.0, diff=0.34
+   K=98.0: price=0.305, intrinsic=0.0, diff=0.305
+   K=98.5: price=0.265, intrinsic=0.0, diff=0.265
+   K=99.0: price=0.24, intrinsic=0.0, diff=0.24
+   K=99.5: price=0.215, intrinsic=0.0, diff=0.215
+   K=100.0: price=0.2, intrinsic=0.0, diff=0.2
+   K=100.5: price=0.175, intrinsic=0.0, diff=0.175
+   K=101.0: price=0.17, intrinsic=0.0, diff=0.17
+   K=101.5: price=0.155, intrinsic=0.0, diff=0.155
+
+2. ATM options analysis:
+   ATM IV: 34.87%
+   ATM price range: 0.485 - 2.635
+   Implied sigma from ATM prices: 41.97%
+
+3. Deep ITM options analysis:
+   Deep ITM calls (K < S-10):
+   K=80.0: price=0.045, intrinsic=12.28, extrinsic=-12.235 (-99.63%)
+   K=81.5: price=0.045, intrinsic=10.78, extrinsic=-10.735 (-99.58%)
+   K=82.0: price=0.045, intrinsic=10.28, extrinsic=-10.235 (-99.56%)
+   K=75.0: price=0.03, intrinsic=17.28, extrinsic=-17.25 (-99.83%)
+   K=80.0: price=0.04, intrinsic=12.28, extrinsic=-12.24 (-99.67%)
+
+--- Black-76 Price Comparison ---
+
+1. Black-76 with market IV:
+   RMSPE: 10200.91%
+   RMAE: 3.3367
+
+   Sample comparisons (first 5 calls):
+   K=97.0: market=0.385, Black-76=1.5223, error=1.137315
+   K=97.5: market=0.34, Black-76=1.3436, error=1.003572
+   K=98.0: market=0.305, Black-76=1.1949, error=0.889905
+   K=98.5: market=0.265, Black-76=1.0659, error=0.800945
+   K=99.0: market=0.24, Black-76=0.9471, error=0.707085
+
+2. Black-76 with recalibrated IV:
+   RMSPE: 10172.14%
+   RMAE: 2.8736
+
+================================================================================
+Analysis Summary
+================================================================================
+The BZ option data represents actual market prices for futures options.
+Black-76 is the correct model for futures-style margining options.
+The RMSPE of ~10,000% indicates market prices deviate significantly from
+Black-76 theoretical prices, which could be due to:
+  - Bid-ask spreads and liquidity effects
+  - Market microstructure effects (futures-style margining)
+  - Potential data issues or different pricing conventions
+================================================================================
