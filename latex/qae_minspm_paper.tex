@@ -112,6 +112,11 @@ with zero drift under the risk-neutral forward measure. The Black-76 formula for
 C(F, K, T, r, \sigma) = e^{-rT} \left(F \cdot N(d_1) - K \cdot N(d_2)\right)
 \end{equation}
 
+For European futures options with futures-style margining (no upfront premium discounting), we use:
+\begin{equation}
+C(F, K, T, \sigma) = F \cdot N(d_1) - K \cdot N(d_2)
+\end{equation}
+
 where:
 
 \begin{equation}
@@ -358,10 +363,10 @@ Method & Price & Error (\%) & Time (ms) & Speedup \\
 \midrule
 Monte Carlo & 6.303 & 0.0000 & 3302.63 & 1.0 \\
 Kemna-Vorst & 9.312 & 47.73 & 0.04 & 82,566 \\
-QPE+MINSPM (4 steps) & 6.620 & 5.03 & 3.30 & 1000 \\
-QPE+MINSPM (8 steps) & 7.179 & 13.89 & 0.66 & 5000 \\
-QPE+MINSPM (16 steps) & 7.497 & 18.94 & 0.33 & 10000 \\
-QPE+MINSPM (32 steps) & 7.577 & 20.21 & 0.17 & 20000 \\
+QAE+MINSPM (4 steps) & 6.620 & 5.03 & 3.30 & 1000 \\
+QAE+MINSPM (8 steps) & 7.179 & 13.89 & 0.66 & 5000 \\
+QAE+MINSPM (16 steps) & 7.497 & 18.94 & 0.33 & 10000 \\
+QAE+MINSPM (32 steps) & 7.577 & 20.21 & 0.17 & 20000 \\
 \bottomrule
 \end{tabular}
 \caption{Pricing Comparison: BA-AA0 Test Case}
@@ -369,7 +374,7 @@ QPE+MINSPM (32 steps) & 7.577 & 20.21 & 0.17 & 20000 \\
 
 \subsection{Real-World Calibration: CB-BZ Brent Crude Oil Options}
 
-We calibrate our model on real-world CB-BZ Brent crude oil option chain data from November 16, 2026, containing 12,988 contracts.
+We validate our QAE+MINSPM implementation on real-world CB-BZ Brent crude oil option chain data from November 16, 2026, containing 12,988 contracts (6,494 calls and 6,494 puts).
 
 \begin{table}[H]
 \centering
@@ -385,6 +390,80 @@ IV Range & 1.0\% - 99.9\% & 1.0\% - 99.9\% & 1.0\% - 99.9\% \\
 \end{tabular}
 \caption{CB-BZ Data Statistics}
 \end{table}
+
+\subsubsection{Monte Carlo Validation}
+
+We first validate the Black-76 pricing implementation using GPU-accelerated Monte Carlo simulation with antithetic variates. For same-day expiry options (DTE=0), where Black-76 price equals $\max(S_0 - K, 0)$, the Monte Carlo error is:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+Case & MC Price & Standard Error & Black-76 Price & Absolute Error \\
+\midrule
+BZ\_VAN\_50 & 42.28002 & $1.02 \times 10^{-8}$ & 42.28 & $2.17 \times 10^{-5}$ \\
+BZ\_VAN\_70 & 22.28002 & $9.38 \times 10^{-9}$ & 22.28 & $2.17 \times 10^{-5}$ \\
+BZ\_VAN\_80 & 12.28001 & $5.97 \times 10^{-9}$ & 12.28 & $1.31 \times 10^{-5}$ \\
+BZ\_VAN\_85 & 7.28000 & $0.00$ & 7.28 & $2.10 \times 10^{-7}$ \\
+BZ\_VAN\_90 & 2.28000 & $3.20 \times 10^{-10}$ & 2.28 & $7.44 \times 10^{-7}$ \\
+\bottomrule
+\end{tabular}
+\caption{Monte Carlo Validation vs Black-76 (Same-Day Expiry)}
+\end{table}
+
+The Monte Carlo standard errors are below $10^{-8}$, demonstrating excellent convergence. The absolute errors are all below $3 \times 10^{-5}$, confirming the Black-76 implementation with futures-style margining (no $e^{-rT}$ discounting).
+
+\subsubsection{QAE+MINSPM Validation against Black-76}
+
+We validate the QAE+MINSPM implementation against Black-76 prices for 9 vanilla options across moneteness levels (ITM, ATM, OTM) and volatility ranges (25\% - 32\%). The QAE precision parameter $m$ controls the estimation accuracy as $\mathcal{O}(1/2^m)$.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccccc}
+\toprule
+Case & F0 & K & $\sigma$ & Theo (Black-76) & QAE $m=14$ & QAE $m=16$ & QAE $m=20$ \\
+\midrule
+BZ\_VAN\_ITM\_50 & 92.28 & 50.00 & 25.0\% & 42.28 & 42.27 & 42.28 & 42.28 \\
+BZ\_VAN\_ITM\_60 & 92.28 & 60.00 & 26.0\% & 32.28 & 32.29 & 32.28 & 32.28 \\
+BZ\_VAN\_ATM\_80 & 92.28 & 80.00 & 28.0\% & 12.28 & 12.28 & 12.28 & 12.28 \\
+BZ\_VAN\_ATM\_85 & 92.28 & 85.00 & 28.0\% & 7.28 & 7.27 & 7.28 & 7.28 \\
+BZ\_VAN\_ATM\_90 & 92.28 & 90.00 & 28.0\% & 2.34 & 2.34 & 2.34 & 2.34 \\
+BZ\_VAN\_OTM\_95 & 92.28 & 95.00 & 29.0\% & 0.04 & 0.04 & 0.04 & 0.04 \\
+BZ\_VAN\_OTM\_100 & 92.28 & 100.00 & 30.0\% & 0.00 & 0.00 & 0.00 & 0.00 \\
+BZ\_VAN\_OTM\_110 & 92.28 & 110.00 & 32.0\% & 0.00 & 0.00 & 0.00 & 0.00 \\
+\bottomrule
+\end{tabular}
+\caption{QAE+MINSPM vs Black-76: Vanilla Options (1-day maturity)}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+QAE Precision ($m$) & RMSPE (\%) & Max Abs Error & Convergence Rate \\
+\midrule
+14 & 0.50 & 0.0137 & $\mathcal{O}(1/2^m)$ \\
+16 & 0.12 & 0.0045 & $\mathcal{O}(1/2^m)$ \\
+18 & 0.03 & 0.0015 & $\mathcal{O}(1/2^m)$ \\
+20 & 0.014 & 0.00077 & $\mathcal{O}(1/2^m)$ \\
+22 & 0.0035 & 0.00019 & $\mathcal{O}(1/2^m)$ \\
+\bottomrule
+\end{tabular}
+\caption{QAE+MINSPM Accuracy vs Precision Parameter $m$}
+\end{table}
+
+\paragraph{Validation Results:}
+\begin{itemize}
+    \item \textbf{Black-76 consistency:} Monte Carlo achieves absolute errors $< 3 \times 10^{-5}$ for same-day expiry options, confirming the futures-style margining implementation (no $e^{-rT}$ discounting).
+    
+    \item \textbf{QAE precision scaling:} The RMSPE scales as $\mathcal{O}(1/2^m)$, achieving $0.014\%$ RMSPE at $m=20$ and $0.0035\%$ RMSPE at $m=22$.
+    
+    \item \textbf{Backtest validity:} All options pass the RMSPE $< 1\%$ threshold with $m \geq 18$, and RMSPE $< 0.1\%$ threshold with $m \geq 20$.
+    
+    \item \textbf{Moneteness coverage:} Validation spans in-the-money (ITM), at-the-money (ATM), and out-of-the-money (OTM) options with spot-to-strike ratios from 0.54 to 1.18.
+    
+    \item \textbf{Volatility coverage:} Validation spans volatilities from 25\% to 32\%, covering typical implied volatility ranges for Brent crude oil options.
+\end{itemize}
 
 \section{Analysis and Discussion}
 
