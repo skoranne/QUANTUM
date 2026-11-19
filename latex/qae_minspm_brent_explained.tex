@@ -1,0 +1,145 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\geometry{margin=1in}
+
+\title{QAE, QPE, and MINSPM with Cyclotomic Dictionary Encoding\\for Arithmetic Asian Options on Brent (CB-BZ)}
+\author{Quantum Finance Notes (generated from repository analysis)}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We describe how Quantum Phase Estimation (QPE), Quantum Amplitude Estimation (QAE), and Matrix-Induced Non-linear Spectral Product Mapping (MINSPM) are combined to price arithmetic Asian (AA) options. The key algebraic tool is \emph{cyclotomic dictionary encoding}: phases are indexed in $\mathbb{Z}_{2^K}$ with $\zeta_{2^K}=e^{2\pi i/2^K}$ so that separable phase sums factor exactly as products, avoiding exponential enumeration. We formalize the AA payoff for Brent/futures under the risk-neutral forward measure, present the QPE/QAE and MINSPM mechanics with LaTeX mathematics, and report concrete valuation/calibration values for a synthetic BA-AA0 benchmark and for real Brent CB-BZ option-chain calibration (Nov.\ 16, 2026).
+\end{abstract}
+
+\section{Arithmetic Asian option for Brent (futures form)}
+Let Brent be represented by a futures (or forward) price process $F(t)$ under the risk-neutral forward measure $\mathbb{Q}$. For fixing times $0<t_1<\cdots<t_N=T$,
+\begin{equation}
+F(t_i)=F(0)\exp\!\left(-\tfrac{1}{2}\sigma^2 t_i + \sigma W^{\mathbb{Q}}(t_i)\right),\qquad \big(W^{\mathbb{Q}}(t_1),\ldots,W^{\mathbb{Q}}(t_N)\big)\sim \mathcal{N}(0,\Sigma),\;\Sigma_{ij}=\sigma^2\min(t_i,t_j).
+\label{eq:gbm}
+\end{equation}
+Define the arithmetic average
+\begin{equation}
+A_N=\frac{1}{N}\sum_{i=1}^{N}F(t_i).
+\label{eq:avg}
+\end{equation}
+A European arithmetic Asian call pays $\Pi_c=\max(A_N-K,0)$ with discounted value
+\begin{equation}
+V_0^{(c)} = e^{-rT}\,\mathbb{E}^{\mathbb{Q}}\!\left[\max\!\left(A_N-K,\;0\right)\right],
+\label{eq:price}
+\end{equation}
+and the put analog $\Pi_p=\max(K-A_N,0)$. In practice (e.g.\ CB-BZ Brent option chains), market quotes and calibrated surfaces inform $\sigma(\cdot)$ and tenors; the quantum/classical-hybrid pricing goal is to estimate \eqref{eq:price} efficiently.
+
+\section{QPE: Quantum Phase Estimation}
+QAE is commonly realized via QPE on a Grover operator. Construct a state-preparation unitary $\mathcal{A}$ such that
+\begin{equation}
+\mathcal{A}|0\rangle^{\otimes n}|0\rangle=\sqrt{1-\tilde\mu}\,|\phi_0\rangle|0\rangle+\sqrt{\tilde\mu}\,|\phi_1\rangle|1\rangle,\qquad \tilde\mu \propto \mathbb{E}\!\left[\max(A_N-K,0)\right],
+\label{eq:ampencode}
+\end{equation}
+encoding the (scaled) payoff into the ``good'' subspace. Define
+\begin{equation}
+Q = -\mathcal{A}\,S_0\,\mathcal{A}^\dagger\,S_{\chi},
+\label{eq:grover}
+\end{equation}
+with standard reflections $S_0,S_\chi$. The eigenstructure satisfies $\sin^2\theta=\tilde\mu$ (up to encoding conventions). \textbf{QPE} applies controlled powers of $Q$ followed by $\mathrm{QFT}^\dagger$ on an ancilla register to estimate $\theta/(2\pi)$, hence $\tilde\mu=\sin^2\theta$, achieving precision $\mathcal{O}(1/M)$ with $\mathcal{O}(M)$ applications of $Q$ (quadratic advantage over classical Monte Carlo $\mathcal{O}(1/\sqrt{T_{\mathrm{MC}}})$).
+
+\section{QAE: Quantum Amplitude Estimation}
+\textbf{QAE} estimates $\mu=\mathbb{E}[g(X)]$ by amplitude amplification: iterating $Q^m$ yields
+\begin{equation}
+Q^m|\psi\rangle=\sin\!\big((2m+1)\theta\big)|\phi_1\rangle|1\rangle+\cos\!\big((2m+1)\theta\big)|\cdot\rangle|0\rangle,
+\label{eq:qaeiter}
+\end{equation}
+from which $\theta$ (and $\mu$) is inferred via phase estimation or iterative schemes. For AA options on Brent, $g$ is induced by the clipped average payoff in \eqref{eq:price}.
+
+\section{MINSPM: low-rank spectral compression}
+With $N$ fixings, naive state/path branching is intractable. \textbf{MINSPM} (Matrix-Induced Non-linear Spectral Product Mapping) exploits:
+\begin{itemize}
+  \item Linearity of $\mathcal{A}$ in \eqref{eq:avg} and Gaussian log-dynamics from \eqref{eq:gbm}.
+  \item Structured covariance $\Sigma_{ij}=\sigma^2\min(t_i,t_j)$ (Toeplitz-like) with rapidly decaying eigenvalues.
+\end{itemize}
+By eigen-decomposing the induced operator and truncating to the top $k\ll N$ modes (a compact spectral/dictionary basis), the effective state dimension is reduced (typically $k\in\{4,\ldots,8\}$ in practice), avoiding exponential growth. A discrete moment-matching form used in implementation is
+\begin{equation}
+\operatorname{Var}\!\left(\frac{1}{N}\sum_{i=1}^{N}F(t_i)\right)\propto \frac{(N+1)(2N+1)}{6N^2},\qquad
+\sigma_{\mathrm{eff}}=\sigma\sqrt{\frac{(N+1)(2N+1)/(6N^2)}{(M+1)(2M+1)/(6M^2)}}\,,
+\label{eq:sigmaeff}
+\end{equation}
+illustrating how coarse QAE steps ($M\ll N$) can be compensated in an effective-volatility approximation (e.g.\ $N=21,M=4\Rightarrow \sigma_{\mathrm{eff}}\approx 0.873\,\sigma$).
+
+\section{Cyclotomic dictionary encoding (algebraic compression)}
+A key compression device is evaluation in the cyclotomic ring $\mathbb{Z}_{2^K}$ with
+\begin{equation}
+\zeta_{2^K}=e^{2\pi i/2^K}.
+\label{eq:zeta}
+\end{equation}
+For separable (bilinear) phase functions appearing in structured Fourier/AQFT-like constructions,
+\begin{equation}
+Q(x,y)=\sum_{j=1}^{t} c_j(y)\,x_j,\qquad x_j\in\{0,1\},\quad c_j(y)\in \mathbb{Z}_{2^K},
+\label{eq:separable}
+\end{equation}
+the exponential superposition collapses exactly:
+\begin{equation}
+\sum_{x\in\{0,1\}^t}\zeta_{2^K}^{Q(x,y)}
+=\prod_{j=1}^{t}\left(1+\zeta_{2^K}^{c_j(y)}\right).
+\label{eq:factor}
+\end{equation}
+\paragraph{Cyclotomic dictionary.} Instead of enumerating $2^t$ assignments, one stores a compact dictionary of phase coefficients $\mathcal{D}=\{c_j(y)\}_{j=1}^{t}\subset \mathbb{Z}_{2^K}$ (the \emph{cyclotomic dictionary}) and evaluates amplitudes via \eqref{eq:factor} in $\mathcal{O}(tK)$ time (fixed $K$ gives $\mathcal{O}(t)$). In QAE+MINSPM for AA options, MINSPM supplies a low-rank spectral basis while cyclotomic dictionary encoding supplies algebraic factorization of structured phase sums, together preventing exponential blow-up in multi-step averaging and enabling efficient amplitude estimation for $\mathbb{E}[\max(A_N-K,0)]$.
+
+\section{Algorithmic sketch (QAE+MINSPM)}
+A conceptual pipeline (as used in this repository’s experiments) is:
+\begin{enumerate}
+  \item Calibrate $(\sigma,\ldots)$ from market/history (e.g.\ Brent CB-BZ / underlying series).
+  \item Build MINSPM/cyclotomic dictionary representation (truncate to $k$ modes; encode phases in $\mathbb{Z}_{2^K}$ when applicable).
+  \item Prepare amplitude encoding \eqref{eq:ampencode} for the clipped arithmetic average payoff.
+  \item Apply Grover iterations $Q^m$ \eqref{eq:grover} and QPE/QAE inference \eqref{eq:qaeiter} to estimate $\tilde\mu$, recover $V_0^{(c)}\approx e^{-rT}\cdot (\text{scaled }\tilde\mu)$.
+\end{enumerate}
+
+\section{Values (results)}
+\subsection{(A) Synthetic BA-AA0 benchmark (illustrative)}
+Parameters: $S_0=K=100$, $r=5\%$, $\sigma=20\%$, $T=1$ year, $N=21$ daily fixings. Example reported results:
+\begin{table}[h]
+\centering
+\begin{tabular}{lccc}
+\toprule
+Method & Price & Error vs MC (\%) & Notes \\
+\midrule
+Monte Carlo (10M paths) & 6.303 & 0.00 & reference \\
+Kemna--Vorst (approx.) & 9.312 & 47.73 & analytic approx.\ (context) \\
+QPE+MINSPM (4 steps) & 6.620 & $\sim$5.03 & quantum-inspired / hybrid run \\
+\bottomrule
+\end{tabular}
+\caption{BA-AA0 arithmetic Asian call (illustrative values from repository notes).}
+\label{tab:baaa0}
+\end{table}
+
+\subsection{(B) Brent CB-BZ option-chain calibration (real data)}
+\textbf{Dataset:} CB-BZ Brent crude oil option chain, 2026-11-16 (12{,}988 contracts total: calls/puts). Calibration/validation focused on filtered contracts with \texttt{DTE>0}, \texttt{IV>0.01}, \texttt{Mid>0} (\textbf{4042} contracts). The metric is RMSPE between model/theoretical prices and market mid prices (as used in this repository’s calibration scripts).
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lc}
+\toprule
+Stage (pipeline) & RMSPE \\
+\midrule
+Baseline (raw model Theo vs Mid) & 52.3\% \\
+Calibrated (DTE+IV + bonus scaling) & 27.16\% \\
+Optim (DTE+IV, Nelder--Mead) & 26.40\% \\
+Optim (DTE+IV + Moneyness bins) & \textbf{23.20\%} (best reported) \\
+\bottomrule
+\end{tabular}
+\caption{Brent CB-BZ calibration improvement summary (filtered 4042 contracts). Moneyness bins: OTM $\le 0.95$, ATM $(0.95,1.05]$, ITM $>1.05$ (applied jointly with DTE/IV scales).}
+\label{tab:brent}
+\end{table}
+
+\paragraph{Interpretation (B).} Relative to the uncalibrated baseline (52.3\% RMSPE), the QAE/MINSPM-inspired pricing stack combined with the above calibrations reduces pricing--market divergence to \textbf{23.2\% RMSPE} (a relative reduction of $\approx 55.6\%$). This is the reported ``value'' of the calibration pipeline on Brent CB-BZ data in this workspace; further gains typically require finer regime/interaction modeling or richer market microstructure adjustments.
+
+\section{Conclusion}
+QPE/QAE provide the amplitude-estimation backbone for expectations of path-dependent payoffs; MINSPM supplies low-rank spectral compression for multi-fixing arithmetic averages; cyclotomic dictionary encoding (\eqref{eq:zeta}--\eqref{eq:factor}) provides exact algebraic factorization of separable phase sums, preventing exponential enumeration. Together they form a practical blueprint for AA option pricing on Brent: benchmarked on BA-AA0 and validated/calibrated on CB-BZ chains with measurable RMSPE improvements (Table~\ref{tab:brent}).
+
+\end{document}
